@@ -1,0 +1,65 @@
+services:
+  frontend:
+    build:
+      context: ./budget-tracker-frontend-final-main
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_DEV_BASE_URL_V1: /api/v1
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_DEV_BASE_URL_V1: /api/v1
+    expose:
+      - "3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - internal_net
+
+  backend:
+    build:
+      context: ./budget-tracker-backend-final
+      dockerfile: Dockerfile
+    env_file:
+      - ./budget-tracker-backend-final/.env
+    environment:
+      NODE_ENV: production
+      SERVER_PORT: ${BACKEND_PORT:-5001}
+      SERVER_BASE_URL: https://financial.seribuweb.site
+      CORS_ORIGIN: https://financial.seribuweb.site
+    expose:
+      - "${BACKEND_PORT:-5001}"
+    restart: unless-stopped
+    networks:
+      - internal_net
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./deploy/certbot/www:/var/www/certbot
+      - ./deploy/certbot/conf:/etc/letsencrypt
+    restart: unless-stopped
+    networks:
+      - internal_net
+
+  certbot:
+    image: certbot/certbot:latest
+    profiles:
+      - tools
+    volumes:
+      - ./deploy/certbot/www:/var/www/certbot
+      - ./deploy/certbot/conf:/etc/letsencrypt
+    networks:
+      - internal_net
+
+networks:
+  internal_net:
+    name: financial_internal_net
+    driver: bridge
