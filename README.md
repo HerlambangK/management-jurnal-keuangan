@@ -1,6 +1,4 @@
 # jurnal-keuangan
-# jurnal-keuangan
-# management-jurnal-keuangan
 
 ## Deployment
 - Setup production VPS: [deploy/PRODUCTION_DEPLOY.md](deploy/PRODUCTION_DEPLOY.md)
