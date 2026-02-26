@@ -1,0 +1,153 @@
+{
+  "data_keuangan": {
+    "generated_at": "2026-02-25T08:20:00.000Z",
+    "source": "summary_page_generate",
+    "period": {
+      "reference_month": "2026-02",
+      "start_date": "2026-02-01",
+      "end_date": "2026-02-28"
+    },
+    "summary": {
+      "balance": 3600000,
+      "income": 12500000,
+      "expense": 8900000,
+      "saving": 2500000,
+      "remaining_money": 3600000,
+      "expense_ratio_percent": 71.2
+    },
+    "chart": {
+      "points": [
+        { "date": "2026-02-01", "income": 3000000, "expense": 450000, "net": 2550000 },
+        { "date": "2026-02-03", "income": 0, "expense": 250000, "net": -250000 },
+        { "date": "2026-02-05", "income": 2500000, "expense": 800000, "net": 1700000 },
+        { "date": "2026-02-09", "income": 2000000, "expense": 1100000, "net": 900000 },
+        { "date": "2026-02-12", "income": 0, "expense": 950000, "net": -950000 },
+        { "date": "2026-02-15", "income": 1800000, "expense": 700000, "net": 1100000 },
+        { "date": "2026-02-20", "income": 3200000, "expense": 1850000, "net": 1350000 },
+        { "date": "2026-02-24", "income": 0, "expense": 2800000, "net": -2800000 }
+      ],
+      "total_points": 8,
+      "total_income": 12500000,
+      "total_expense": 8900000,
+      "net_flow": 3600000,
+      "peak_income": 3200000,
+      "peak_expense": 2800000
+    },
+    "transactions": {
+      "total_count": 22,
+      "income_count": 6,
+      "expense_count": 16,
+      "total_amount": 21400000,
+      "average_amount": 972727.27,
+      "items": [
+        { "id": 1201, "date": "2026-02-01", "category": "Gaji", "type": "income", "amount": 3000000, "note": "Gaji bulanan" },
+        { "id": 1202, "date": "2026-02-01", "category": "Transport", "type": "expense", "amount": 200000, "note": "Bensin" },
+        { "id": 1203, "date": "2026-02-01", "category": "Makan", "type": "expense", "amount": 250000, "note": "Makan mingguan" },
+        { "id": 1204, "date": "2026-02-03", "category": "Makan", "type": "expense", "amount": 250000, "note": "Lunch meeting" },
+        { "id": 1205, "date": "2026-02-05", "category": "Freelance", "type": "income", "amount": 2000000, "note": "Project A" },
+        { "id": 1206, "date": "2026-02-05", "category": "Bonus", "type": "income", "amount": 500000, "note": "Insentif mingguan" },
+        { "id": 1207, "date": "2026-02-05", "category": "Makan", "type": "expense", "amount": 300000, "note": "Belanja dapur kecil" },
+        { "id": 1208, "date": "2026-02-05", "category": "Belanja", "type": "expense", "amount": 500000, "note": "Groceries" },
+        { "id": 1209, "date": "2026-02-09", "category": "Pendapatan Lainnya", "type": "income", "amount": 2000000, "note": "Refund proyek" },
+        { "id": 1210, "date": "2026-02-09", "category": "Utilitas", "type": "expense", "amount": 600000, "note": "Listrik dan internet" },
+        { "id": 1211, "date": "2026-02-09", "category": "Transport", "type": "expense", "amount": 500000, "note": "Operasional" },
+        { "id": 1212, "date": "2026-02-12", "category": "Belanja", "type": "expense", "amount": 450000, "note": "Belanja rumah" },
+        { "id": 1213, "date": "2026-02-12", "category": "Utilitas", "type": "expense", "amount": 500000, "note": "Tagihan air dan listrik" },
+        { "id": 1214, "date": "2026-02-15", "category": "Freelance", "type": "income", "amount": 1800000, "note": "Project B" },
+        { "id": 1215, "date": "2026-02-15", "category": "Makan", "type": "expense", "amount": 700000, "note": "Kebutuhan 1 minggu" },
+        { "id": 1216, "date": "2026-02-20", "category": "Gaji", "type": "income", "amount": 3200000, "note": "Gaji tambahan" },
+        { "id": 1217, "date": "2026-02-20", "category": "Sewa", "type": "expense", "amount": 1200000, "note": "Sewa kost" },
+        { "id": 1218, "date": "2026-02-20", "category": "Transport", "type": "expense", "amount": 350000, "note": "Perjalanan dinas" },
+        { "id": 1219, "date": "2026-02-20", "category": "Hiburan", "type": "expense", "amount": 300000, "note": "Streaming dan nongkrong" },
+        { "id": 1220, "date": "2026-02-24", "category": "Sewa", "type": "expense", "amount": 1800000, "note": "Cicilan tempat tinggal" },
+        { "id": 1221, "date": "2026-02-24", "category": "Hiburan", "type": "expense", "amount": 600000, "note": "Acara akhir pekan" },
+        { "id": 1222, "date": "2026-02-24", "category": "Utilitas", "type": "expense", "amount": 400000, "note": "Tagihan tambahan" }
+      ]
+    },
+    "insights": {
+      "recommended_saving": 2500000,
+      "saving_gap": 0,
+      "saving_status": "good"
+    },
+    "daily": {
+      "points": [
+        { "date": "2026-02-01", "income": 3000000, "expense": 450000, "net": 2550000, "transaction_count": 3 },
+        { "date": "2026-02-03", "income": 0, "expense": 250000, "net": -250000, "transaction_count": 1 },
+        { "date": "2026-02-05", "income": 2500000, "expense": 800000, "net": 1700000, "transaction_count": 4 },
+        { "date": "2026-02-09", "income": 2000000, "expense": 1100000, "net": 900000, "transaction_count": 3 },
+        { "date": "2026-02-12", "income": 0, "expense": 950000, "net": -950000, "transaction_count": 2 },
+        { "date": "2026-02-15", "income": 1800000, "expense": 700000, "net": 1100000, "transaction_count": 2 },
+        { "date": "2026-02-20", "income": 3200000, "expense": 1850000, "net": 1350000, "transaction_count": 4 },
+        { "date": "2026-02-24", "income": 0, "expense": 2800000, "net": -2800000, "transaction_count": 3 }
+      ],
+      "total_points": 8,
+      "total_income": 12500000,
+      "total_expense": 8900000,
+      "net_flow": 3600000
+    },
+    "weekly": {
+      "points": [
+        {
+          "week_label": "2026-02 W1",
+          "start_date": "2026-02-01",
+          "end_date": "2026-02-05",
+          "income": 5500000,
+          "expense": 1500000,
+          "net": 4000000,
+          "transaction_count": 8
+        },
+        {
+          "week_label": "2026-02 W2",
+          "start_date": "2026-02-09",
+          "end_date": "2026-02-12",
+          "income": 2000000,
+          "expense": 2050000,
+          "net": -50000,
+          "transaction_count": 5
+        },
+        {
+          "week_label": "2026-02 W3",
+          "start_date": "2026-02-15",
+          "end_date": "2026-02-20",
+          "income": 5000000,
+          "expense": 2550000,
+          "net": 2450000,
+          "transaction_count": 6
+        },
+        {
+          "week_label": "2026-02 W4",
+          "start_date": "2026-02-24",
+          "end_date": "2026-02-24",
+          "income": 0,
+          "expense": 2800000,
+          "net": -2800000,
+          "transaction_count": 3
+        }
+      ],
+      "total_points": 4,
+      "total_income": 12500000,
+      "total_expense": 8900000,
+      "net_flow": 3600000
+    },
+    "monthly": {
+      "points": [
+        { "month": "2025-03", "income": 9800000, "expense": 7600000, "net": 2200000, "transaction_count": 30 },
+        { "month": "2025-04", "income": 10200000, "expense": 8400000, "net": 1800000, "transaction_count": 33 },
+        { "month": "2025-05", "income": 10900000, "expense": 9300000, "net": 1600000, "transaction_count": 36 },
+        { "month": "2025-06", "income": 11100000, "expense": 8900000, "net": 2200000, "transaction_count": 35 },
+        { "month": "2025-07", "income": 12000000, "expense": 10100000, "net": 1900000, "transaction_count": 37 },
+        { "month": "2025-08", "income": 11800000, "expense": 9900000, "net": 1900000, "transaction_count": 34 },
+        { "month": "2025-09", "income": 12400000, "expense": 10400000, "net": 2000000, "transaction_count": 38 },
+        { "month": "2025-10", "income": 11700000, "expense": 9700000, "net": 2000000, "transaction_count": 32 },
+        { "month": "2025-11", "income": 12100000, "expense": 10800000, "net": 1300000, "transaction_count": 39 },
+        { "month": "2025-12", "income": 13500000, "expense": 12100000, "net": 1400000, "transaction_count": 41 },
+        { "month": "2026-01", "income": 11900000, "expense": 9700000, "net": 2200000, "transaction_count": 31 },
+        { "month": "2026-02", "income": 12500000, "expense": 8900000, "net": 3600000, "transaction_count": 22 }
+      ],
+      "total_points": 12,
+      "total_income": 139900000,
+      "total_expense": 115800000,
+      "net_flow": 24100000
+    }
+  }
+}

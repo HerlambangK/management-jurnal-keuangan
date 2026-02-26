@@ -1,0 +1,26 @@
+{
+  "development": {
+    "username": "root",
+    "password": "root",
+    "database": "budget_tracker_dev",
+    "host": "127.0.0.1",
+    "port": 8889,
+    "dialect": "mysql"
+  },
+  "test": {
+    "username": "root",
+    "password": "root",
+    "database": "budget_tracker_test",
+    "host": "127.0.0.1",
+    "port": 8889,
+    "dialect": "mysql"
+  },
+  "production": {
+    "username": "root",
+    "password": "root",
+    "database": "budget_tracker_prod",
+    "host": "127.0.0.1",
+    "port": 8889,
+    "dialect": "mysql"
+  }
+}

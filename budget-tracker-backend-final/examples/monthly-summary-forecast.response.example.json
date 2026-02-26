@@ -1,0 +1,63 @@
+{
+  "success": true,
+  "message": "berhasil mengambil forecast bulanan",
+  "data": {
+    "next_month_label": "Maret 2026",
+    "predicted_income": 13150000,
+    "predicted_expense": 9540000,
+    "predicted_balance": 3610000,
+    "income_range": {
+      "min": 12400000,
+      "max": 13800000
+    },
+    "expense_range": {
+      "min": 9000000,
+      "max": 10200000
+    },
+    "balance_range": {
+      "min": 2500000,
+      "max": 4500000
+    },
+    "confidence": 78,
+    "confidence_label": "menengah",
+    "sample_size": 12,
+    "source": "ai+statistical",
+    "model": "meta-llama/llama-3.3-8b-instruct:free",
+    "insight": "Pemasukan bulan depan diproyeksikan tetap stabil dengan ruang surplus yang masih sehat. Kendali pengeluaran kategori variabel akan paling berpengaruh menjaga saldo di atas Rp3 juta.",
+    "action_items": [
+      "Batasi pengeluaran bulanan maksimal Rp9.800.000 agar saldo tetap positif.",
+      "Alokasikan tabungan otomatis minimal Rp2.600.000 di awal bulan.",
+      "Pasang evaluasi realisasi mingguan dengan batas belanja sekitar Rp2.450.000 per minggu."
+    ],
+    "history_points": [
+      {
+        "month": "Maret 2025",
+        "year": 2025,
+        "total_income": 9800000,
+        "total_expense": 7600000,
+        "balance": 2200000
+      },
+      {
+        "month": "April 2025",
+        "year": 2025,
+        "total_income": 10200000,
+        "total_expense": 8400000,
+        "balance": 1800000
+      },
+      {
+        "month": "Mei 2025",
+        "year": 2025,
+        "total_income": 10900000,
+        "total_expense": 9300000,
+        "balance": 1600000
+      },
+      {
+        "month": "Juni 2025",
+        "year": 2025,
+        "total_income": 11100000,
+        "total_expense": 8900000,
+        "balance": 2200000
+      }
+    ]
+  }
+}
