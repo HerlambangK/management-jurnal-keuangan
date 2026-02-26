@@ -15,44 +15,52 @@ export default function EditTransactionPage() {
     const rawId = params?.id;
     const id = Array.isArray(rawId) ? rawId[0] : rawId;
     const router = useRouter();
-
-    if(!id || typeof id !== "string"){
-        return <>Invalid Transaction ID</>
-    }
+    const isInvalidId = !id || typeof id !== "string";
 
     const [initialData, setInitialData] = useState<TransactionFormData>();
     const [loading, setLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [modal, setModal] = useState<ModalProps | null>(null);
 
-    const loadTransaction = async () => {
-        try {
-            const res = await fetchTransactionById(Number(id));
-            const tx = res.data;
-
-            setInitialData({
-                type: tx.type,
-                amount: tx.amount.toString(),
-                date: tx.date.slice(0, 10),
-                note: tx.note,
-                categoryId: tx.category_id
-            })
-        } catch (error) {
-            if(error instanceof Error){
-                setModal({ message: error.message, type: "danger", title: "Gagal", okText: "Tutup"});
-            } else {
-                setModal({ message: "Terjadi Kesalahan", type: "danger", title: "Gagal", okText: "Tutup"});
-            }
-        } finally {
-            setLoading(false);
-        }
-    }
-
     useEffect(() => {
-        loadTransaction();
-    }, [id]);
+        if (isInvalidId) {
+            setLoading(false);
+            return;
+        }
+
+        const loadTransaction = async () => {
+            setLoading(true);
+            try {
+                const res = await fetchTransactionById(Number(id));
+                const tx = res.data;
+
+                setInitialData({
+                    type: tx.type,
+                    amount: tx.amount.toString(),
+                    date: tx.date.slice(0, 10),
+                    note: tx.note,
+                    categoryId: tx.category_id
+                });
+            } catch (error) {
+                if(error instanceof Error){
+                    setModal({ message: error.message, type: "danger", title: "Gagal", okText: "Tutup"});
+                } else {
+                    setModal({ message: "Terjadi Kesalahan", type: "danger", title: "Gagal", okText: "Tutup"});
+                }
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        void loadTransaction();
+    }, [id, isInvalidId]);
 
     const handleSubmit = async (form: TransactionFormData) => {
+        if (isInvalidId) {
+            setModal({ message: "ID transaksi tidak valid", type: "danger", title: "Gagal", okText: "Tutup"});
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             await editTransaction(Number(id), {
@@ -77,6 +85,7 @@ export default function EditTransactionPage() {
     }
 
     if (loading) return <LoadingSpinnerScreen />;
+    if (isInvalidId) return <>Invalid Transaction ID</>;
 
     return (
         <div className="space-y-5 p-4 md:p-6">

@@ -80,6 +80,8 @@ export default function Profilepage() {
         }
     }
 
+    if (loading) return <LoadingSpinnerScreen />;
+
     return (
         <div className="mx-auto max-w-2xl space-y-6 p-4 md:p-6">
             <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-600 to-indigo-500 p-5 text-white shadow-lg">
