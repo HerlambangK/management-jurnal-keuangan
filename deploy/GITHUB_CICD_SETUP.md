@@ -2,7 +2,7 @@
 
 Tujuan:
 - Setiap push ke `main` akan menjalankan CI.
-- Jika CI sukses, server VPS otomatis pull update dan redeploy Docker.
+- Jika CI sukses, server VPS otomatis pull update, migrasi DB, dan redeploy Docker.
 
 ## 1. Persiapan di VPS (sekali saja)
 Jalankan setup produksi dulu:
@@ -50,6 +50,12 @@ Alur:
    - `git pull --ff-only origin main`
    - `bash ./deploy/server-deploy.sh`
 
+`server-deploy.sh` sudah mencakup:
+- start service MySQL
+- run migrasi (`docker compose --profile tools run --rm migrator`)
+- redeploy backend/frontend/nginx
+- validasi reload nginx
+
 ## 5. Test pipeline
 Commit kecil lalu push:
 
@@ -75,6 +81,6 @@ Di VPS:
 ```bash
 cd /opt/financial-app
 git log --oneline -n 5
-git reset --hard <commit-sebelumnya>
+git checkout <commit-sebelumnya>
 bash ./deploy/server-deploy.sh
 ```

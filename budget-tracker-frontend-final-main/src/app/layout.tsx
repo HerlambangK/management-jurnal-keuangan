@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Poppins } from 'next/font/google';
 import './globals.css';
+import NetworkStatusBanner from '@/ui/NetworkStatusBanner';
 
 const poppins = Poppins({
 	subsets: ['latin'],
@@ -20,8 +21,9 @@ export default function RootLayout({
 }>) {
 	return (
 		<html lang='en'>
-			<body className={`${poppins.variable} bg-gray-100 antialiased`}>
+			<body className={`${poppins.variable} overflow-x-hidden bg-gray-100 antialiased`}>
 				{children}
+				<NetworkStatusBanner />
 			</body>
 		</html>
 	);

@@ -10,7 +10,7 @@ import {
   AiOutlineSwap,
   AiOutlineUser,
 } from "react-icons/ai";
-import { logout, profile } from "@/services/auth";
+import { logout, profileSafe } from "@/services/auth";
 
 type NavItem = {
   href: string;
@@ -24,6 +24,7 @@ const navItems: NavItem[] = [
   { href: "/dashboard/summary", icon: <AiOutlineSolution className="size-5 opacity-85" />, label: "Summary" },
   { href: "/dashboard/profile", icon: <AiOutlineUser className="size-5 opacity-85" />, label: "Profil" },
 ];
+const PROFILE_CACHE_KEY = "auth_profile_cache_v1";
 
 const isActivePath = (pathname: string, href: string) => {
   if (href === "/dashboard") return pathname === href;
@@ -34,23 +35,54 @@ const Sidebar = () => {
   const pathname = usePathname() || "";
   const router = useRouter();
   const [initial, setInitial] = useState("U");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchProfile = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        if (!token) {
-          router.push("/");
+      const token = localStorage.getItem("token");
+      if (!token) {
+        router.replace("/");
+        return;
+      }
+
+      const { data, error } = await profileSafe(token);
+      if (error) {
+        if (error.isUnauthorized) {
+          logout();
+          router.replace("/");
           return;
         }
 
-        const res = await profile(token);
-        const name = res.data?.name || "";
-        if (name.length > 0) setInitial(name[0].toUpperCase());
-      } catch (error) {
-        console.error(error);
-        logout();
-        router.push("/");
+        const cachedProfile = localStorage.getItem(PROFILE_CACHE_KEY);
+        if (cachedProfile) {
+          try {
+            const parsed = JSON.parse(cachedProfile) as {
+              name?: string;
+              avatar_url?: string | null;
+            };
+            const cachedName = parsed?.name || "";
+            const cachedAvatar = parsed?.avatar_url || "";
+            if (cachedName.length > 0) {
+              setInitial(cachedName[0].toUpperCase());
+            }
+            setAvatarUrl(cachedAvatar || null);
+          } catch (_error) {
+            // ignore invalid cache
+          }
+        }
+        return;
+      }
+
+      const user = data?.data;
+      const name = user?.name || "";
+      const avatar = typeof user?.avatar_url === "string" ? user.avatar_url : "";
+
+      if (name.length > 0) {
+        setInitial(name[0].toUpperCase());
+      }
+      setAvatarUrl(avatar || null);
+      if (user) {
+        localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(user));
       }
     };
 
@@ -67,6 +99,27 @@ const Sidebar = () => {
     window.location.href = "/";
   };
 
+  const avatarBadge = (sizeClass: string, textClass: string) => {
+    if (avatarUrl) {
+      return (
+        <img
+          src={avatarUrl}
+          alt="Foto profil"
+          className={`${sizeClass} rounded-lg border border-slate-200 object-cover`}
+          onError={() => setAvatarUrl(null)}
+        />
+      );
+    }
+
+    return (
+      <span
+        className={`grid ${sizeClass} place-content-center rounded-lg bg-slate-100 ${textClass} font-semibold text-slate-600`}
+      >
+        {initial}
+      </span>
+    );
+  };
+
   return (
     <>
       <div className="fixed inset-x-0 top-0 z-50 border-b border-slate-200 bg-white/95 px-3 py-2 backdrop-blur md:hidden">
@@ -76,9 +129,7 @@ const Sidebar = () => {
             <p className="text-sm font-semibold text-slate-800">{activeLabel}</p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="grid size-8 place-content-center rounded-lg bg-slate-100 text-xs font-semibold text-slate-600">
-              {initial}
-            </span>
+            {avatarBadge("size-8", "text-xs")}
             <button
               onClick={handleLogout}
               className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600"
@@ -116,9 +167,7 @@ const Sidebar = () => {
       <aside className="fixed left-0 top-0 z-50 hidden h-screen w-16 flex-col justify-between border-r border-slate-100 bg-white md:flex">
         <div>
           <div className="inline-flex size-16 items-center justify-center">
-            <span className="grid size-10 place-content-center rounded-lg bg-slate-100 text-xs font-semibold text-slate-600">
-              {initial}
-            </span>
+            {avatarBadge("size-10", "text-xs")}
           </div>
 
           <div className="border-t border-slate-100 px-2 pt-4">

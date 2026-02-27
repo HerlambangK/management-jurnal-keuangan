@@ -10,7 +10,7 @@ import {
   FaReceipt,
   FaWallet,
 } from "react-icons/fa";
-import { profile as fetchProfile } from "@/services/auth";
+import { logout, profileSafe } from "@/services/auth";
 import {
   fetchMonthlyChart,
   fetchMonthlySummary,
@@ -91,17 +91,23 @@ export default function DashboardPage() {
       try {
         const token = localStorage.getItem("token") || "";
 
-        const [chartRes, summaryRes, recentRes, profileRes] = await Promise.all([
+        const [chartRes, summaryRes, recentRes, profileResult] = await Promise.all([
           fetchMonthlyChart(),
           fetchMonthlySummary(),
           fetchTodayTransaction(),
-          token ? fetchProfile(token) : Promise.resolve(undefined),
+          token ? profileSafe(token) : Promise.resolve({ data: null, error: null }),
         ]);
 
         setChartData(Array.isArray(chartRes?.data) ? chartRes.data : []);
         setSummary(summaryRes?.data || null);
         setRecentTransactions(Array.isArray(recentRes?.data) ? recentRes.data : []);
-        setUserName(profileRes?.data?.name || "User");
+        setUserName(profileResult?.data?.data?.name || "User");
+
+        if (profileResult?.error?.isUnauthorized) {
+          logout();
+          window.location.href = "/";
+          return;
+        }
       } catch (error) {
         if (error instanceof Error) {
           setErrorMessage(error.message);

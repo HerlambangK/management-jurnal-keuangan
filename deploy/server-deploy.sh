@@ -4,26 +4,25 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-detect_backend_port() {
-  local port=""
-  if [[ -f "budget-tracker-backend-final/.env" ]]; then
-    port="$(grep -E '^SERVER_PORT=' budget-tracker-backend-final/.env | tail -n 1 | cut -d '=' -f2 | tr -d '[:space:]' || true)"
-  fi
+if [[ -f "${ROOT_DIR}/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${ROOT_DIR}/.env"
+  set +a
+fi
 
-  if [[ -z "${port}" && -f "budget-tracker-backend-final/.env.example" ]]; then
-    port="$(grep -E '^SERVER_PORT=' budget-tracker-backend-final/.env.example | tail -n 1 | cut -d '=' -f2 | tr -d '[:space:]' || true)"
-  fi
+echo "[deploy] start mysql"
+docker compose up -d mysql
 
-  if [[ -z "${port}" ]]; then
-    port="5001"
-  fi
+echo "[deploy] run db migration"
+docker compose --profile tools run --rm migrator
 
-  echo "${port}"
-}
+echo "[deploy] deploy app services"
+docker compose up -d --build backend frontend nginx --remove-orphans
 
-export BACKEND_PORT="$(detect_backend_port)"
-echo "[deploy] BACKEND_PORT=${BACKEND_PORT}"
+echo "[deploy] validate nginx config"
+docker compose exec -T nginx nginx -t
+docker compose exec -T nginx nginx -s reload
 
-docker compose up -d --build --remove-orphans
 docker compose ps
 docker image prune -f

@@ -1,7 +1,11 @@
 export interface AxiosErrorLike {
+  message?: string;
+  code?: string;
   response?: {
-    data?: string;
+    status?: number;
+    data?: unknown;
   };
+  request?: unknown;
 }
 
 export interface ApiErrorResponse {
@@ -10,6 +14,15 @@ export interface ApiErrorResponse {
   [key: string]: unknown;
 }
 
-interface ValidationError {
+export interface ValidationError {
   msg: string;
+}
+
+export interface ParsedApiError {
+  message: string;
+  status: number | null;
+  code?: string;
+  isNetworkError: boolean;
+  isUnauthorized: boolean;
+  raw: unknown;
 }
