@@ -20,6 +20,7 @@ build/
 coverage/
 tmp/
 temp/
+uploads/
 *.pid
 
 # OS / Editor

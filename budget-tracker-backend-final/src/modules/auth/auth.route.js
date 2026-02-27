@@ -2,7 +2,12 @@ const express = require('express');
 const router = express.Router();
 const AuthController = require('./auth.controller');
 const asyncErrorHandler = require('../../errors/asyncErrorHandler');
-const { registerValidator, loginValidator } = require('./auth.validator');
+const {
+    registerValidator,
+    loginValidator,
+    updateProfileValidator,
+    sessionsQueryValidator,
+} = require('./auth.validator');
 const validateRequest = require('../../middlewares/validation.middleware');
 const authJWT = require('../../middlewares/auth.middleware');
 
@@ -21,6 +26,22 @@ router.post('/login',
 router.get('/profile', 
     authJWT,
     asyncErrorHandler(AuthController.profile.bind(AuthController))
-)
+);
+
+router.put(
+    '/profile',
+    authJWT,
+    updateProfileValidator,
+    validateRequest,
+    asyncErrorHandler(AuthController.updateProfile.bind(AuthController))
+);
+
+router.get(
+    '/sessions',
+    authJWT,
+    sessionsQueryValidator,
+    validateRequest,
+    asyncErrorHandler(AuthController.sessions.bind(AuthController))
+);
 
 module.exports = router;

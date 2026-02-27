@@ -24,6 +24,10 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.STRING(50),
             allowNull: true,
         },
+        avatar_url: {
+            type: DataTypes.STRING(255),
+            allowNull: true,
+        },
         password: {
             type: DataTypes.STRING(255),
             allowNull: false
@@ -54,7 +58,11 @@ module.exports = (sequelize, DataTypes) => {
         User.hasMany(models.MonthlySummary, {
             foreignKey: 'user_id',
             as: 'summary_user'
-        })
+        });
+        User.hasMany(models.LoginSession, {
+            foreignKey: 'user_id',
+            as: 'login_sessions',
+        });
     }
     
     return User;
