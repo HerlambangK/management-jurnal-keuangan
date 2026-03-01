@@ -28,6 +28,12 @@ export interface LoginSessionItem {
   logged_in_at: string;
 }
 
+export interface SessionDeleteData {
+  deleted: number;
+  remaining?: number;
+  require_relogin?: boolean;
+}
+
 export interface ProfileData extends AuthUser {
   sessions?: LoginSessionItem[];
 }
@@ -47,6 +53,7 @@ export type LoginResponse = ApiResponse<LoginResult>;
 export type RegisterResponse = ApiResponse<LoginResult>;
 export type ProfileResponse = ApiResponse<ProfileData>;
 export type SessionListResponse = ApiResponse<LoginSessionItem[]>;
+export type SessionDeleteResponse = ApiResponse<SessionDeleteData>;
 
 export interface UpdateProfilePayload {
   name?: string;

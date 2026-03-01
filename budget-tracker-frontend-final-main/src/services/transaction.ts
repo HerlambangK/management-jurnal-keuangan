@@ -2,10 +2,11 @@ import api from "@/api";
 import { handleApiError } from "@/utils/handleApiError";
 import getTokenHeader from "@/utils/getTokenHeader";
 
-export const fetchTransaction = async (page = 1, limit = 10, search = "") => {
+export const fetchTransaction = async (page = 1, limit = 10, search = "", month = "") => {
     try {
         const params = new URLSearchParams({ page: String(page), limit: String(limit)});
         if(search) params.append("search", search);
+        if(month) params.append("month", month);
 
         const res = await api.get(`/transaction?${params.toString()}`, {
             headers: getTokenHeader(),
@@ -60,9 +61,13 @@ export const deleteTransaction = async (id: number) => {
     }
 }
 
-export const fetchMonthlySummary = async () => {
+export const fetchMonthlySummary = async (month = "") => {
     try {
-        const res = await api.get(`/transaction/monthly-summary`, {
+        const params = new URLSearchParams();
+        if (month) params.append("month", month);
+        const suffix = params.toString() ? `?${params.toString()}` : "";
+
+        const res = await api.get(`/transaction/monthly-summary${suffix}`, {
             headers: getTokenHeader(),
         });
         return res.data
@@ -71,9 +76,28 @@ export const fetchMonthlySummary = async () => {
     }
 }
 
-export const fetchMonthlyChart = async () => {
+export const fetchMonthlyChart = async (month = "") => {
     try {
-        const res = await api.get(`/transaction/monthly-chart`, {
+        const params = new URLSearchParams();
+        if (month) params.append("month", month);
+        const suffix = params.toString() ? `?${params.toString()}` : "";
+
+        const res = await api.get(`/transaction/monthly-chart${suffix}`, {
+            headers: getTokenHeader(),
+        });
+        return res.data
+    } catch (error) {
+        handleApiError(error, "Transaction Error")
+    }
+}
+
+export const fetchFinancialOverview = async (month = "") => {
+    try {
+        const params = new URLSearchParams();
+        if (month) params.append("month", month);
+        const suffix = params.toString() ? `?${params.toString()}` : "";
+
+        const res = await api.get(`/transaction/financial-overview${suffix}`, {
             headers: getTokenHeader(),
         });
         return res.data

@@ -304,10 +304,11 @@ export const deleteMonthlySummary = async (id: number) => {
 }
 
 export const generateMonthlySummary = async (
-    payload?: FinancialAIGenerateRequestPayload
+    payload?: FinancialAIGenerateRequestPayload,
+    month?: string
 ) => {
     try {
-        const requestBody = payload || {};
+        const requestBody = payload ? { ...payload, month } : { month };
         const res = await api.post('/monthly-summary/generate', requestBody, {
             headers: getTokenHeader()
         });

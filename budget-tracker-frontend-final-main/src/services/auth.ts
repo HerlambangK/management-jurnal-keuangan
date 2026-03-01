@@ -5,6 +5,7 @@ import {
     ProfileResponse,
     RegisterData,
     RegisterResponse,
+    SessionDeleteResponse,
     SessionListResponse,
     UpdateProfilePayload,
 } from "@/interfaces/IAuth";
@@ -71,6 +72,28 @@ export const fetchLoginSessions = async (limit = 15): Promise<SessionListRespons
         return response.data;
     } catch (error) {
         handleApiError(error, "Get Login Session Failed");
+    }
+};
+
+export const deleteLoginSession = async (sessionId: number): Promise<SessionDeleteResponse> => {
+    try {
+        const response = await api.delete(`/auth/sessions/${sessionId}`, {
+            headers: getTokenHeader(),
+        });
+        return response.data;
+    } catch (error) {
+        handleApiError(error, "Delete Login Session Failed");
+    }
+};
+
+export const clearLoginSessions = async (): Promise<SessionDeleteResponse> => {
+    try {
+        const response = await api.delete("/auth/sessions", {
+            headers: getTokenHeader(),
+        });
+        return response.data;
+    } catch (error) {
+        handleApiError(error, "Clear Login Sessions Failed");
     }
 };
 

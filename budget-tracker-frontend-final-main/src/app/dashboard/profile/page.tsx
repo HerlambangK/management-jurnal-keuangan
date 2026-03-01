@@ -2,7 +2,14 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { fetchLoginSessions, logout, profileSafe, updateProfile } from "@/services/auth";
+import {
+  clearLoginSessions,
+  deleteLoginSession,
+  fetchLoginSessions,
+  logout,
+  profileSafe,
+  updateProfile,
+} from "@/services/auth";
 import { LoginSessionItem } from "@/interfaces/IAuth";
 import LoadingSpinnerScreen from "@/ui/LoadingSpinnerScreen";
 import Modal from "@/ui/Modal";
@@ -80,6 +87,8 @@ export default function ProfilePage() {
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [avatarBase64, setAvatarBase64] = useState<string | null | undefined>(undefined);
   const [sessions, setSessions] = useState<LoginSessionItem[]>([]);
+  const [deletingSessionId, setDeletingSessionId] = useState<number | null>(null);
+  const [isClearingSessions, setIsClearingSessions] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modal, setModal] = useState<ModalProps | null>(null);
@@ -115,6 +124,25 @@ export default function ProfilePage() {
 
     if (Array.isArray(profileData.sessions)) {
       setSessions(profileData.sessions);
+    }
+  };
+
+  const syncCachedSessions = (nextSessions: LoginSessionItem[]) => {
+    try {
+      const cachedProfile = localStorage.getItem(PROFILE_CACHE_KEY);
+      if (!cachedProfile) return;
+      const parsed = JSON.parse(cachedProfile);
+      if (!parsed || typeof parsed !== "object") return;
+
+      localStorage.setItem(
+        PROFILE_CACHE_KEY,
+        JSON.stringify({
+          ...(parsed as Record<string, unknown>),
+          sessions: nextSessions,
+        })
+      );
+    } catch (_error) {
+      // ignore invalid cache
     }
   };
 
@@ -161,7 +189,11 @@ export default function ProfilePage() {
 
       try {
         const sessionRes = await fetchLoginSessions(15);
-        setSessions(Array.isArray(sessionRes?.data) ? sessionRes.data : profileData?.sessions || []);
+        const latestSessions = Array.isArray(sessionRes?.data)
+          ? sessionRes.data
+          : profileData?.sessions || [];
+        setSessions(latestSessions);
+        syncCachedSessions(latestSessions);
       } catch (_sessionError) {
         // Keep sessions from profile response if dedicated request fails
       } finally {
@@ -276,10 +308,87 @@ export default function ProfilePage() {
     }
   };
 
+  const handleDeleteSession = async (sessionId: number) => {
+    setDeletingSessionId(sessionId);
+    try {
+      await deleteLoginSession(sessionId);
+      setSessions((prev) => {
+        const nextSessions = prev.filter((item) => item.id !== sessionId);
+        syncCachedSessions(nextSessions);
+        return nextSessions;
+      });
+      setModal({
+        type: "success",
+        title: "Berhasil",
+        message: "Riwayat login berhasil dihapus.",
+        okText: "Oke",
+      });
+    } catch (error) {
+      const knownError = toApiServiceError(error, "Gagal menghapus riwayat login");
+      if (knownError.isUnauthorized) {
+        logout();
+        router.replace("/");
+        return;
+      }
+
+      setModal({
+        type: "danger",
+        title: "Gagal",
+        message: toFriendlyError(knownError),
+        okText: "Tutup",
+      });
+    } finally {
+      setDeletingSessionId(null);
+    }
+  };
+
+  const handleClearSessions = async () => {
+    if (sessions.length === 0) return;
+    const confirmed = window.confirm("Hapus semua riwayat login? Setelah ini kamu harus login ulang.");
+    if (!confirmed) return;
+
+    setIsClearingSessions(true);
+    try {
+      const clearResult = await clearLoginSessions();
+      setSessions([]);
+      syncCachedSessions([]);
+
+      if (clearResult?.data?.require_relogin) {
+        localStorage.removeItem(PROFILE_CACHE_KEY);
+        logout();
+        window.location.href = "/";
+        return;
+      }
+
+      setModal({
+        type: "success",
+        title: "Berhasil",
+        message: "Semua riwayat login berhasil dihapus.",
+        okText: "Oke",
+      });
+    } catch (error) {
+      const knownError = toApiServiceError(error, "Gagal menghapus semua riwayat login");
+      if (knownError.isUnauthorized) {
+        logout();
+        router.replace("/");
+        return;
+      }
+
+      setModal({
+        type: "danger",
+        title: "Gagal",
+        message: toFriendlyError(knownError),
+        okText: "Tutup",
+      });
+    } finally {
+      setIsClearingSessions(false);
+    }
+  };
+
   if (loading) return <LoadingSpinnerScreen />;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
+    <div className="space-y-6">
       <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-600 to-indigo-500 p-5 text-white shadow-lg">
         <h2 className="text-2xl font-bold">Profil Pengguna</h2>
         <p className="mt-1 text-sm text-indigo-50">
@@ -436,14 +545,36 @@ export default function ProfilePage() {
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="text-base font-semibold text-slate-800">Riwayat Login</h3>
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-base font-semibold text-slate-800">Riwayat Login</h3>
+              <button
+                type="button"
+                onClick={handleClearSessions}
+                disabled={sessions.length === 0 || isClearingSessions}
+                className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isClearingSessions ? "Menghapus..." : "Hapus Semua (Login Ulang)"}
+              </button>
+            </div>
             {sessions.length === 0 ? (
               <p className="mt-3 text-sm text-slate-500">Belum ada data sesi login.</p>
             ) : (
               <div className="mt-3 space-y-3">
                 {sessions.map((session) => (
                   <div key={session.id} className="rounded-xl border border-slate-200 p-3">
-                    <p className="text-sm font-semibold text-slate-800">{session.device || "Perangkat tidak diketahui"}</p>
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-800">
+                        {session.device || "Perangkat tidak diketahui"}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteSession(session.id)}
+                        disabled={deletingSessionId === session.id || isClearingSessions}
+                        className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {deletingSessionId === session.id ? "..." : "Hapus"}
+                      </button>
+                    </div>
                     <p className="mt-1 text-xs text-slate-600">IP: {session.ip_address || "-"}</p>
                     <p className="text-xs text-slate-600">Lokasi: {session.location || "-"}</p>
                     <p className="text-xs text-slate-500">{formatSessionTime(session.logged_in_at)}</p>

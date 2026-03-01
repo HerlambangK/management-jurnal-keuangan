@@ -129,6 +129,43 @@ class AuthService {
         return await this.getLoginSessions(userId, limit);
     }
 
+    async deleteSession(userId, sessionId) {
+        const totalSessions = await LoginSession.count({
+            where: {
+                user_id: userId,
+            },
+        });
+
+        if (totalSessions <= 1) {
+            throw new BadRequestError(
+                'Sesi terakhir tidak dapat dihapus. Gunakan hapus semua untuk login ulang.'
+            );
+        }
+
+        const deleted = await LoginSession.destroy({
+            where: {
+                id: sessionId,
+                user_id: userId,
+            },
+        });
+
+        if (!deleted) {
+            throw new NotFound('Sesi login tidak ditemukan');
+        }
+
+        return { deleted, remaining: Math.max(totalSessions - deleted, 0) };
+    }
+
+    async clearSessions(userId) {
+        const deleted = await LoginSession.destroy({
+            where: {
+                user_id: userId,
+            },
+        });
+
+        return { deleted, require_relogin: true };
+    }
+
     async getLoginSessions(userId, limit = 15) {
         const safeLimit = Math.min(Math.max(Number(limit) || 15, 1), 50);
         try {

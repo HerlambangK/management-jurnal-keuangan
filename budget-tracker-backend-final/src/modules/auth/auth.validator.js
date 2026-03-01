@@ -1,4 +1,4 @@
-const { body, query } = require('express-validator');
+const { body, param, query } = require('express-validator');
 
 const registerValidator = [
   body('name')
@@ -61,9 +61,16 @@ const sessionsQueryValidator = [
     .withMessage('Limit minimal 1 dan maksimal 50'),
 ];
 
+const sessionIdParamValidator = [
+  param('sessionId')
+    .isInt({ min: 1 })
+    .withMessage('ID sesi login tidak valid'),
+];
+
 module.exports = {
   registerValidator,
   loginValidator,
   updateProfileValidator,
   sessionsQueryValidator,
+  sessionIdParamValidator,
 };

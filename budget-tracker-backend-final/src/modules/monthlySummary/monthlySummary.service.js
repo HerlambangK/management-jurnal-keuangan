@@ -6,6 +6,30 @@ const BadRequestError = require('../../errors/BadRequestError');
 const NotFound = require('../../errors/NotFoundError');
 
 class MonthlySummaryService {
+    normalizeMonthFilter(monthValue) {
+        if (typeof monthValue !== 'string') return null;
+        const trimmed = monthValue.trim();
+        if (!trimmed) return null;
+
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(trimmed)) {
+            throw new BadRequestError('Format month harus YYYY-MM.');
+        }
+
+        return trimmed;
+    }
+
+    resolveMonthFilterFromRequest(requestBody, frontendFinancialData) {
+        const explicitMonth = this.normalizeMonthFilter(
+            typeof requestBody?.month === 'string' ? requestBody.month : ''
+        );
+        if (explicitMonth) return explicitMonth;
+
+        const payloadMonth = this.normalizeMonthFilter(
+            frontendFinancialData?.period?.reference_month || ''
+        );
+        return payloadMonth;
+    }
+
     async getAll(userId) {
         return await MonthlySummary.findAll({
             where: {
@@ -668,10 +692,14 @@ class MonthlySummaryService {
     }
 
     async generate(userId, requestBody = {}) {
-        const monthlyStats = await this.getCurrentMonthStats(userId);
         const normalizedFrontendFinancialData = this.normalizeFinancialPayload(
             requestBody?.data_keuangan
         );
+        const requestedMonth = this.resolveMonthFilterFromRequest(
+            requestBody,
+            normalizedFrontendFinancialData
+        );
+        const monthlyStats = await this.getCurrentMonthStats(userId, requestedMonth);
         const frontendPayloadEvaluation = this.evaluateFrontendPayload(
             monthlyStats,
             normalizedFrontendFinancialData
@@ -690,7 +718,9 @@ class MonthlySummaryService {
         );
 
         if (monthlyStats.transactionCount === 0 && !frontendFinancialData) {
-            throw new BadRequestError('Belum ada transaksi bulan ini untuk dibuatkan ringkasan.');
+            throw new BadRequestError(
+                `Belum ada transaksi pada bulan ${monthlyStats.reference_month} untuk dibuatkan ringkasan.`
+            );
         }
 
         let llmResponse = await this.requestInsightFromLLM(
@@ -771,14 +801,14 @@ class MonthlySummaryService {
             };
         }
 
-        const referenceMonth =
-            frontendFinancialData?.period?.reference_month || '';
-        const now = new Date();
-        const currentMonth = `${now.getFullYear()}-${String(
-            now.getMonth() + 1
-        ).padStart(2, '0')}`;
+        const referenceMonth = frontendFinancialData?.period?.reference_month || '';
+        const expectedReferenceMonth = monthlyStats?.reference_month || '';
 
-        if (referenceMonth && referenceMonth !== currentMonth) {
+        if (
+            referenceMonth &&
+            expectedReferenceMonth &&
+            referenceMonth !== expectedReferenceMonth
+        ) {
             return {
                 usableData: null,
                 status: `stale_period_${referenceMonth}`,
@@ -875,10 +905,38 @@ class MonthlySummaryService {
         });
     }
 
-    async getCurrentMonthStats(userId) {
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    async getCurrentMonthStats(userId, monthFilter = null) {
+        const normalizedMonth = this.normalizeMonthFilter(monthFilter);
+        const targetDate = normalizedMonth
+            ? new Date(`${normalizedMonth}-01T00:00:00`)
+            : new Date();
+
+        const today = new Date();
+        const isCurrentMonth =
+            targetDate.getFullYear() === today.getFullYear() &&
+            targetDate.getMonth() === today.getMonth();
+
+        const startOfMonth = new Date(
+            targetDate.getFullYear(),
+            targetDate.getMonth(),
+            1,
+            0,
+            0,
+            0,
+            0
+        );
+        const endOfMonth = new Date(
+            targetDate.getFullYear(),
+            targetDate.getMonth() + 1,
+            0,
+            23,
+            59,
+            59,
+            999
+        );
+        const referenceMonth = `${targetDate.getFullYear()}-${String(
+            targetDate.getMonth() + 1
+        ).padStart(2, '0')}`;
 
         const transactions = await Transaction.findAll({
             where: {
@@ -987,7 +1045,13 @@ class MonthlySummaryService {
             .slice(0, 3)
             .map(([category, amount]) => ({ category, amount }));
 
-        const elapsedDays = Math.max(1, Math.min(now.getDate(), endOfMonth.getDate()));
+        const currentDayForTarget = isCurrentMonth
+            ? today.getDate()
+            : endOfMonth.getDate();
+        const elapsedDays = Math.max(
+            1,
+            Math.min(currentDayForTarget, endOfMonth.getDate())
+        );
         const projectedExpense = (totalExpense / elapsedDays) * endOfMonth.getDate();
         const projectedBalance = totalIncome - projectedExpense;
         const topExpenseCategoryShare =
@@ -1013,8 +1077,9 @@ class MonthlySummaryService {
         const healthStatus = healthScore >= 75 ? 'sehat' : healthScore >= 50 ? 'waspada' : 'kritis';
 
         return {
-            month: now.toLocaleString('id-ID', { month: 'long' }),
-            year: String(now.getFullYear()),
+            month: targetDate.toLocaleString('id-ID', { month: 'long' }),
+            year: String(targetDate.getFullYear()),
+            reference_month: referenceMonth,
             total_income: totalIncome,
             total_expense: totalExpense,
             balance,
@@ -1035,7 +1100,7 @@ class MonthlySummaryService {
             maxExpenseTx,
             topExpenseCategories,
             daysInMonth: endOfMonth.getDate(),
-            currentDay: now.getDate(),
+            currentDay: currentDayForTarget,
             transactionsForAi: transactionsForAi.slice(-60),
             elapsedDays,
             projectedExpense,

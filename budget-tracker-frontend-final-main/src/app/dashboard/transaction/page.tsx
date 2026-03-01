@@ -8,8 +8,6 @@ import {
   FaArrowUp,
   FaChartLine,
   FaEdit,
-  FaInfoCircle,
-  FaPiggyBank,
   FaPlus,
   FaReceipt,
   FaSearch,
@@ -19,19 +17,20 @@ import {
   FaWallet,
 } from "react-icons/fa";
 import { AiOutlineClose } from "react-icons/ai";
-import { SummaryData, Transaction } from "@/interfaces/IDashboard";
+import { FinancialOverviewData, Transaction } from "@/interfaces/IDashboard";
 import { ModalProps } from "@/interfaces/IModal";
 import { TransactionFormData } from "@/interfaces/ITransaction";
 import {
   createTransaction,
   deleteTransaction,
   editTransaction,
-  fetchMonthlySummary,
+  fetchFinancialOverview,
   fetchTransaction,
   fetchTransactionById,
 } from "@/services/transaction";
 import formatRupiah from "@/utils/formatRupiah";
 import Modal from "@/ui/Modal";
+import MonthPicker from "@/ui/MonthPicker";
 import TransactionForm from "@/pages/TransactionForm";
 
 type SortField = "date" | "amount" | "category" | "type";
@@ -72,10 +71,38 @@ const parseAmount = (amount: string | number): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const toSafeNumber = (value: unknown): number => {
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-  if (typeof value === "string") return parseAmount(value);
-  return 0;
+const getCurrentMonthKey = (): string => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+};
+
+const formatMonthLabel = (monthKey: string): string => {
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) return "periode ini";
+  const parsedDate = new Date(`${monthKey}-01T00:00:00`);
+  if (Number.isNaN(parsedDate.getTime())) return "periode ini";
+
+  return parsedDate.toLocaleDateString("id-ID", {
+    month: "long",
+    year: "numeric",
+  });
+};
+
+const formatShortMonthLabel = (monthKey: string): string => {
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) return monthKey;
+  const parsedDate = new Date(`${monthKey}-01T00:00:00`);
+  if (Number.isNaN(parsedDate.getTime())) return monthKey;
+
+  return parsedDate.toLocaleDateString("id-ID", {
+    month: "short",
+  });
+};
+
+const formatCompactCurrency = (value: number): string => {
+  const absolute = Math.abs(value);
+  if (absolute >= 1_000_000_000) return `Rp ${(value / 1_000_000_000).toFixed(1)}M`;
+  if (absolute >= 1_000_000) return `Rp ${(value / 1_000_000).toFixed(1)}jt`;
+  if (absolute >= 1_000) return `Rp ${(value / 1_000).toFixed(0)}rb`;
+  return `Rp ${Math.round(value)}`;
 };
 
 export default function TransactionPage() {
@@ -84,7 +111,7 @@ export default function TransactionPage() {
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
-  const [monthlySummary, setMonthlySummary] = useState<SummaryData | null>(null);
+  const [financialOverview, setFinancialOverview] = useState<FinancialOverviewData | null>(null);
   const [modal, setModal] = useState<ModalProps | null>(null);
   const [isLoadingTable, setIsLoadingTable] = useState(false);
   const [sortBy, setSortBy] = useState<SortField>("date");
@@ -95,13 +122,17 @@ export default function TransactionPage() {
   const [formInitialData, setFormInitialData] = useState<TransactionFormData | undefined>(undefined);
   const [isFormLoading, setIsFormLoading] = useState(false);
   const [isFormSubmitting, setIsFormSubmitting] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthKey());
+
+  const currentMonthKey = useMemo(() => getCurrentMonthKey(), []);
+  const selectedMonthLabel = useMemo(() => formatMonthLabel(selectedMonth), [selectedMonth]);
 
   const loadTransaction = async () => {
     setIsLoadingTable(true);
     try {
-      const res = await fetchTransaction(page, limit, search);
+      const res = await fetchTransaction(page, limit, search, selectedMonth);
       setTransaction(res?.data || []);
-      setTotalPages(Math.max(res?.pagination?.totalPages || 1, 1));
+      setTotalPages(Math.max(res?.pagination?.totalPage || res?.pagination?.totalPages || 1, 1));
     } catch (error) {
       if (error instanceof Error) {
         console.error({ message: error.message, type: "danger" });
@@ -113,10 +144,10 @@ export default function TransactionPage() {
     }
   };
 
-  const loadMonthlyOverview = async () => {
+  const loadFinancialOverview = async () => {
     try {
-      const res = await fetchMonthlySummary();
-      setMonthlySummary(res?.data || null);
+      const res = await fetchFinancialOverview(selectedMonth);
+      setFinancialOverview(res?.data || null);
     } catch (error) {
       if (error instanceof Error) {
         console.error({ message: error.message, type: "danger" });
@@ -128,11 +159,11 @@ export default function TransactionPage() {
 
   useEffect(() => {
     void loadTransaction();
-  }, [page, search, limit]);
+  }, [page, search, limit, selectedMonth]);
 
   useEffect(() => {
-    void loadMonthlyOverview();
-  }, []);
+    void loadFinancialOverview();
+  }, [selectedMonth]);
 
   useEffect(() => {
     if (!formMode) return;
@@ -232,7 +263,7 @@ export default function TransactionPage() {
 
       closeFormPopup(true);
       await loadTransaction();
-      await loadMonthlyOverview();
+      await loadFinancialOverview();
     } catch (error) {
       if (error instanceof Error) {
         setModal({ type: "danger", title: "Gagal", message: error.message, okText: "Tutup", onOk: () => setModal(null) });
@@ -268,7 +299,7 @@ export default function TransactionPage() {
             onOk: () => setModal(null),
           });
           await loadTransaction();
-          await loadMonthlyOverview();
+          await loadFinancialOverview();
         } catch (error) {
           console.error(error);
           setModal({
@@ -351,71 +382,30 @@ export default function TransactionPage() {
     [transaction]
   );
 
-  const totalIncome = useMemo(() => {
-    if (!monthlySummary) return overview.incomeAmount;
-    return toSafeNumber(monthlySummary.income);
-  }, [monthlySummary, overview.incomeAmount]);
+  const monthlyIncome = useMemo(() => Number(financialOverview?.monthly_income || 0), [financialOverview]);
+  const accumulatedBalance = useMemo(() => Number(financialOverview?.closing_balance || 0), [financialOverview]);
+  const monthlyNetBalance = useMemo(() => Number(financialOverview?.monthly_balance || 0), [financialOverview]);
+  const openingBalance = useMemo(() => Number(financialOverview?.opening_balance || 0), [financialOverview]);
 
-  const totalExpense = useMemo(() => {
-    if (!monthlySummary) return overview.expenseAmount;
-    return toSafeNumber(monthlySummary.expense);
-  }, [monthlySummary, overview.expenseAmount]);
+  const incomeTrend = useMemo(
+    () =>
+      Array.isArray(financialOverview?.income_trend)
+        ? financialOverview.income_trend.map((point) => ({
+            month: point.month,
+            income: Number(point.income || 0),
+          }))
+        : [],
+    [financialOverview]
+  );
 
-  const remainingMoney = useMemo(() => totalIncome - totalExpense, [totalExpense, totalIncome]);
+  const maxIncomeTrend = useMemo(
+    () => incomeTrend.reduce((maxValue, point) => Math.max(maxValue, point.income), 0),
+    [incomeTrend]
+  );
 
-  const recommendedSaving = useMemo(() => {
-    return Math.max(Math.round(totalIncome * 0.2), 0);
-  }, [totalIncome]);
-
-  const averageTransactionValue = useMemo(() => {
-    if (overview.totalCount === 0) return 0;
-    return (overview.incomeAmount + overview.expenseAmount) / overview.totalCount;
-  }, [overview]);
-
-  const expenseToIncomeRatio = useMemo(() => {
-    if (totalIncome <= 0) return totalExpense > 0 ? 100 : 0;
-    return (totalExpense / totalIncome) * 100;
-  }, [totalExpense, totalIncome]);
-
-  const savingsStatus = useMemo(() => {
-    if (recommendedSaving <= 0) {
-      return {
-        tone: "text-slate-600",
-        message: "Belum ada pemasukan. Tambahkan pemasukan agar target tabungan bisa dihitung.",
-      };
-    }
-
-    if (remainingMoney >= recommendedSaving) {
-      return {
-        tone: "text-emerald-600",
-        message: "Bagus, sisa uang kamu sudah memenuhi target tabungan.",
-      };
-    }
-
-    return {
-      tone: "text-amber-600",
-      message: `Agar sesuai target tabungan, tambahkan sekitar ${formatRupiah(recommendedSaving - remainingMoney)}.`,
-    };
-  }, [remainingMoney, recommendedSaving]);
-
-  const savingProgress = useMemo(() => {
-    if (recommendedSaving <= 0) return 0;
-    return Math.min((Math.max(remainingMoney, 0) / recommendedSaving) * 100, 100);
-  }, [remainingMoney, recommendedSaving]);
-
-  const transactionShares = useMemo(() => {
-    if (overview.totalCount === 0) {
-      return { incomeShare: 0, expenseShare: 0 };
-    }
-
-    const incomeShare = Number((((overview.incomeCount / overview.totalCount) * 100).toFixed(1)));
-    const expenseShare = Number((100 - incomeShare).toFixed(1));
-
-    return {
-      incomeShare,
-      expenseShare,
-    };
-  }, [overview.expenseCount, overview.incomeCount, overview.totalCount]);
+  const monthlyTransactionCount = financialOverview?.monthly_transaction_count ?? transaction.length;
+  const monthlyIncomeCount = financialOverview?.income_transaction_count ?? overview.incomeCount;
+  const monthlyExpenseCount = financialOverview?.expense_transaction_count ?? overview.expenseCount;
 
   const pageNumbers = useMemo(() => Array.from({ length: totalPages }, (_, i) => i + 1), [totalPages]);
 
@@ -433,14 +423,29 @@ export default function TransactionPage() {
   );
 
   return (
-    <div className="space-y-6 p-3 md:p-6">
+    <div className="space-y-6">
       <section className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-600 via-indigo-500 to-blue-500 p-4 text-white shadow-lg md:p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-xl font-bold md:text-3xl">Kelola Transaksi</h1>
             <p className="mt-1 text-xs text-indigo-50 md:text-base">
-              Lihat uang masuk, uang keluar, jumlah transaksi, dan sisa uang dalam satu tampilan.
+              Fokuskan analisis pada akumulasi saldo dan pemasukan bulanan agar keputusan keuangan lebih cepat.
             </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-medium text-indigo-100">Bulan data</span>
+              <MonthPicker
+                value={selectedMonth}
+                onChange={(monthKey) => {
+                  setSelectedMonth(monthKey);
+                  setPage(1);
+                }}
+                max={currentMonthKey}
+                theme="glass"
+              />
+              <span className="rounded-full border border-white/35 bg-white/15 px-2.5 py-1 text-[11px] text-indigo-50">
+                {selectedMonthLabel}
+              </span>
+            </div>
           </div>
           <button
             type="button"
@@ -453,116 +458,104 @@ export default function TransactionPage() {
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-12">
-        <div className="h-full rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 p-4 shadow-sm xl:col-span-3">
+      <section className="grid gap-4 xl:grid-cols-12">
+        <div className="h-full rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 p-4 shadow-sm xl:col-span-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-700">Sisa Uang</p>
+            <p className="text-sm font-semibold text-slate-700">Akumulasi Saldo</p>
             <FaWallet className="h-4 w-4 text-indigo-600" />
           </div>
-          <p className={`mt-2 text-2xl font-bold ${remainingMoney >= 0 ? "text-indigo-600" : "text-rose-600"}`}>
-            {formatRupiah(remainingMoney)}
+          <p className={`mt-2 text-2xl font-bold ${accumulatedBalance >= 0 ? "text-indigo-600" : "text-rose-600"}`}>
+            {formatRupiah(accumulatedBalance)}
           </p>
-          <p className="mt-2 text-xs text-slate-500">Sisa uang dihitung dari uang masuk dikurangi uang keluar bulan ini.</p>
+          <p className="mt-2 text-xs text-slate-500">
+            Saldo berjalan sampai akhir {selectedMonthLabel}. Ini metrik utama untuk melihat sisa uang terkumpul.
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div className="rounded-lg border border-slate-200 bg-white px-2 py-2">
+              <p className="text-slate-500">Saldo Awal Bulan</p>
+              <p className="mt-1 font-semibold text-slate-700">{formatRupiah(openingBalance)}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white px-2 py-2">
+              <p className="text-slate-500">Perubahan Bersih</p>
+              <p className={`mt-1 font-semibold ${monthlyNetBalance >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                {monthlyNetBalance >= 0 ? "+ " : "- "}
+                {formatRupiah(Math.abs(monthlyNetBalance))}
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div className="h-full rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm xl:col-span-3">
+        <div className="h-full rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm xl:col-span-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-700">Uang Masuk</p>
+            <p className="text-sm font-semibold text-slate-700">Pemasukan Bulanan</p>
             <FaArrowUp className="h-4 w-4 text-emerald-600" />
           </div>
-          <p className="mt-2 text-2xl font-bold text-emerald-600">{formatRupiah(totalIncome)}</p>
-          <p className="mt-2 text-xs text-slate-500">Total pemasukan pada periode bulan ini.</p>
-        </div>
-
-        <div className="h-full rounded-2xl border border-rose-100 bg-gradient-to-br from-rose-50 to-white p-4 shadow-sm xl:col-span-3">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-700">Uang Keluar</p>
-            <FaArrowDown className="h-4 w-4 text-rose-600" />
-          </div>
-          <p className="mt-2 text-2xl font-bold text-rose-600">{formatRupiah(totalExpense)}</p>
+          <p className="mt-2 text-2xl font-bold text-emerald-600">{formatRupiah(monthlyIncome)}</p>
           <p className="mt-2 text-xs text-slate-500">
-            Dari setiap Rp100 uang masuk, sekitar Rp{expenseToIncomeRatio.toFixed(0)} dipakai untuk pengeluaran.
+            Hanya menampilkan total pemasukan pada periode {selectedMonthLabel} agar fokus analisis pendapatan.
           </p>
+          <div className="mt-3 rounded-lg border border-emerald-100 bg-white px-3 py-2 text-xs">
+            <p className="text-slate-500">Jumlah transaksi pemasukan</p>
+            <p className="mt-1 font-semibold text-emerald-600">
+              {financialOverview?.income_transaction_count || 0} transaksi
+            </p>
+          </div>
         </div>
 
-        <div className="h-full rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 p-4 shadow-sm xl:col-span-3">
+        <div className="h-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-700">Saran Menabung</p>
-            <FaPiggyBank className="h-4 w-4 text-indigo-600" />
-          </div>
-          <p className="mt-2 text-lg font-bold text-indigo-600">{formatRupiah(recommendedSaving)}</p>
-          <p className="mt-1 text-xs text-slate-500">Saran: sisihkan minimal 20% dari uang masuk bulan ini.</p>
-
-          <div className="mt-3 h-2 rounded-full bg-indigo-100">
-            <div className="h-2 rounded-full bg-indigo-500 transition-all" style={{ width: `${savingProgress}%` }} />
-          </div>
-
-          <p className={`mt-2 text-xs font-medium ${savingsStatus.tone}`}>{savingsStatus.message}</p>
-        </div>
-
-        <div className="h-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:col-span-2 xl:col-span-5">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-700">Aktivitas Transaksi</p>
+            <p className="text-sm font-semibold text-slate-700">Aktivitas Bulanan</p>
             <FaReceipt className="h-4 w-4 text-indigo-500" />
           </div>
-
-          <div className="mt-3 grid grid-cols-3 gap-2">
-            <div className="rounded-xl bg-emerald-50 px-2 py-3 text-center">
-              <p className="text-[11px] text-emerald-600">Masuk</p>
-              <p className="mt-1 text-lg font-bold text-emerald-600">{overview.incomeCount}</p>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-center">
+              <p className="text-[11px] text-slate-500">Total Transaksi</p>
+              <p className="mt-1 text-lg font-bold text-slate-700">{financialOverview?.monthly_transaction_count || 0}</p>
             </div>
-            <div className="rounded-xl bg-rose-50 px-2 py-3 text-center">
-              <p className="text-[11px] text-rose-600">Keluar</p>
-              <p className="mt-1 text-lg font-bold text-rose-600">{overview.expenseCount}</p>
-            </div>
-            <div className="rounded-xl bg-slate-100 px-2 py-3 text-center">
-              <p className="text-[11px] text-slate-600">Total</p>
-              <p className="mt-1 text-lg font-bold text-slate-700">{overview.totalCount}</p>
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-2 py-2 text-center">
+              <p className="text-[11px] text-emerald-600">Transaksi Masuk</p>
+              <p className="mt-1 text-lg font-bold text-emerald-600">{financialOverview?.income_transaction_count || 0}</p>
             </div>
           </div>
-
-          <p className="mt-3 text-xs text-slate-500">Berdasarkan data transaksi yang tampil di tabel saat ini.</p>
-          <p className="mt-1 text-xs text-slate-500">
-            Komposisi transaksi: {transactionShares.incomeShare.toFixed(1)}% masuk dan{" "}
-            {transactionShares.expenseShare.toFixed(1)}% keluar.
+          <p className="mt-3 text-xs text-slate-500">
+            Metrik transaksi dihitung untuk bulan {selectedMonthLabel}, tidak terpengaruh pagination tabel.
           </p>
         </div>
 
-        <div className="h-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:col-span-2 xl:col-span-7">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-12">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-semibold text-slate-700">Info Tambahan</p>
-            <FaInfoCircle className="h-4 w-4 text-slate-500" />
+            <div>
+              <p className="text-sm font-semibold text-slate-700">Tren Pemasukan 6 Bulan</p>
+              <p className="mt-1 text-xs text-slate-500">Grafik hanya pemasukan bulanan untuk bantu evaluasi pertumbuhan income.</p>
+            </div>
+            <FaChartLine className="h-4 w-4 text-emerald-600" />
           </div>
 
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <p className="text-[11px] text-slate-500">Rata-rata per Transaksi</p>
-              <p className="mt-1 text-base font-bold text-slate-700">{formatRupiah(averageTransactionValue)}</p>
-              <p className="mt-1 text-[11px] text-slate-500">Diambil dari data transaksi yang sedang tampil.</p>
+          {incomeTrend.length === 0 ? (
+            <div className="mt-4 rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
+              Belum ada data pemasukan untuk ditampilkan.
             </div>
-
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] text-slate-500">Kondisi Pengeluaran</p>
-                <FaChartLine className="h-3.5 w-3.5 text-slate-500" />
-              </div>
-              <p
-                className={`mt-1 text-base font-bold ${
-                  expenseToIncomeRatio <= 70 ? "text-emerald-600" : expenseToIncomeRatio <= 90 ? "text-amber-600" : "text-rose-600"
-                }`}
-              >
-                {expenseToIncomeRatio <= 70 ? "Aman" : expenseToIncomeRatio <= 90 ? "Perlu Kontrol" : "Waspada"}
-              </p>
-              <p className="mt-1 text-[11px] text-slate-500">Idealnya pengeluaran di bawah 70% dari uang masuk.</p>
+          ) : (
+            <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-6">
+              {incomeTrend.map((point) => {
+                const barHeight = maxIncomeTrend > 0 ? Math.max((point.income / maxIncomeTrend) * 100, 8) : 8;
+                const monthTitle = formatMonthLabel(point.month);
+                return (
+                  <div key={point.month} className="flex flex-col items-center gap-2">
+                    <div className="flex h-32 w-full items-end rounded-xl bg-slate-100 p-1.5">
+                      <div
+                        className="w-full rounded-md bg-gradient-to-t from-emerald-500 to-teal-300 transition-all"
+                        style={{ height: `${barHeight}%` }}
+                        title={`${monthTitle}: ${formatRupiah(point.income)}`}
+                      />
+                    </div>
+                    <p className="text-[11px] font-medium text-slate-600">{formatShortMonthLabel(point.month)}</p>
+                    <p className="text-[11px] text-slate-500">{formatCompactCurrency(point.income)}</p>
+                  </div>
+                );
+              })}
             </div>
-
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <p className="text-[11px] text-slate-500">Catatan Perhitungan</p>
-              <p className="mt-1 text-[12px] text-slate-600">
-                Uang masuk, uang keluar, dan sisa uang menggunakan ringkasan bulan agar hitungannya lebih akurat.
-              </p>
-            </div>
-          </div>
+          )}
         </div>
       </section>
 
@@ -621,7 +614,7 @@ export default function TransactionPage() {
                 : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
             }`}
           >
-            Semua ({transaction.length})
+            Semua ({monthlyTransactionCount})
           </button>
           <button
             type="button"
@@ -632,7 +625,7 @@ export default function TransactionPage() {
                 : "border border-emerald-100 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
             }`}
           >
-            Pemasukan ({overview.incomeCount})
+            Pemasukan ({monthlyIncomeCount})
           </button>
           <button
             type="button"
@@ -643,7 +636,7 @@ export default function TransactionPage() {
                 : "border border-rose-100 bg-rose-50 text-rose-700 hover:bg-rose-100"
             }`}
           >
-            Pengeluaran ({overview.expenseCount})
+            Pengeluaran ({monthlyExpenseCount})
           </button>
         </div>
 

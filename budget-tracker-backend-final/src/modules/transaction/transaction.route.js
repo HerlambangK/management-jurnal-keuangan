@@ -18,6 +18,9 @@ router.get('/monthly-summary',
 router.get('/monthly-chart', 
     asyncErrorHandle(TransactionController.getMonthlyChart.bind(TransactionController))
 )
+router.get('/financial-overview', 
+    asyncErrorHandle(TransactionController.getFinancialOverview.bind(TransactionController))
+)
 router.get('/today', 
     asyncErrorHandle(TransactionController.getTodayTransaction.bind(TransactionController))
 )

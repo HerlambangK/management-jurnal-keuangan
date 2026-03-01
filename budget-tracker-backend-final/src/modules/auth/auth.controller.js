@@ -74,6 +74,37 @@ class AuthController {
             next(error);
         }
     }
+
+    async deleteSession(req, res, next) {
+        try {
+            const userId = req.userId;
+            const sessionId = Number(req.params.sessionId);
+            const result = await AuthService.deleteSession(userId, sessionId);
+
+            res.status(200).json({
+                success: true,
+                message: 'Sesi login berhasil dihapus',
+                data: result,
+            });
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    async clearSessions(req, res, next) {
+        try {
+            const userId = req.userId;
+            const result = await AuthService.clearSessions(userId);
+
+            res.status(200).json({
+                success: true,
+                message: 'Riwayat login berhasil dihapus',
+                data: result,
+            });
+        } catch (error) {
+            next(error);
+        }
+    }
 }
 
 module.exports = new AuthController();

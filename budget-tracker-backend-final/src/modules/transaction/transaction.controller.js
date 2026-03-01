@@ -9,8 +9,9 @@ class TransactionController {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const search = req.query.search || "";
+        const month = typeof req.query.month === "string" ? req.query.month : "";
 
-        const result = await TransactionService.getAllByUser(req.userId, page, limit, search);
+        const result = await TransactionService.getAllByUser(req.userId, page, limit, search, month);
 
         res.json({
             success: true,
@@ -76,7 +77,8 @@ class TransactionController {
 
     async getMonthlySummary(req, res, next) {
         try {
-            const data = await TransactionService.getMonthlySummary(req.userId);
+            const month = typeof req.query.month === "string" ? req.query.month : "";
+            const data = await TransactionService.getMonthlySummary(req.userId, month);
             res.status(200).json({succes: true, message: "summary data berhasil di ambil", data});
         } catch (error) {
             next(error);
@@ -85,8 +87,19 @@ class TransactionController {
 
     async getMonthlyChart(req, res, next) {
         try {
-            const data = await TransactionService.getMonthlyChart(req.userId);
+            const month = typeof req.query.month === "string" ? req.query.month : "";
+            const data = await TransactionService.getMonthlyChart(req.userId, month);
             res.status(200).json({succes: true, message: "chart data berhasil di ambil", data});
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    async getFinancialOverview(req, res, next) {
+        try {
+            const month = typeof req.query.month === "string" ? req.query.month : "";
+            const data = await TransactionService.getFinancialOverview(req.userId, month);
+            res.status(200).json({succes: true, message: "ringkasan finansial berhasil diambil", data});
         } catch (error) {
             next(error);
         }

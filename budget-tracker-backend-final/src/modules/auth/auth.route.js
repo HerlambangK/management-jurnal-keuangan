@@ -7,6 +7,7 @@ const {
     loginValidator,
     updateProfileValidator,
     sessionsQueryValidator,
+    sessionIdParamValidator,
 } = require('./auth.validator');
 const validateRequest = require('../../middlewares/validation.middleware');
 const authJWT = require('../../middlewares/auth.middleware');
@@ -42,6 +43,20 @@ router.get(
     sessionsQueryValidator,
     validateRequest,
     asyncErrorHandler(AuthController.sessions.bind(AuthController))
+);
+
+router.delete(
+    '/sessions',
+    authJWT,
+    asyncErrorHandler(AuthController.clearSessions.bind(AuthController))
+);
+
+router.delete(
+    '/sessions/:sessionId',
+    authJWT,
+    sessionIdParamValidator,
+    validateRequest,
+    asyncErrorHandler(AuthController.deleteSession.bind(AuthController))
 );
 
 module.exports = router;

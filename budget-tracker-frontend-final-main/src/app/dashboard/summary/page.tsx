@@ -18,10 +18,39 @@ import { MonthlySummaryForecast, SummaryItem } from "@/interfaces/ISummary";
 import { fetchMonthlyChart, fetchMonthlySummary, fetchTransaction } from "@/services/transaction";
 import { buildFinancialAIGenerateRequestPayload } from "@/utils/buildFinancialPayload";
 import formatRupiah from "@/utils/formatRupiah";
+import MonthPicker from "@/ui/MonthPicker";
 
 const FINANCIAL_PAYLOAD_STORAGE_KEY = "dashboard_financial_payload_v1";
 
 const getHtmlMarkup = (value: string) => ({ __html: value });
+
+const getCurrentMonthKey = (): string => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+const formatMonthLabel = (monthKey: string): string => {
+    if (!/^\d{4}-\d{2}$/.test(monthKey)) return "periode ini";
+    const parsed = new Date(`${monthKey}-01T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return "periode ini";
+    return parsed.toLocaleDateString("id-ID", {
+        month: "long",
+        year: "numeric",
+    });
+}
+
+const doesSummaryMatchMonth = (summary: SummaryItem, monthKey: string): boolean => {
+    if (!/^\d{4}-\d{2}$/.test(monthKey)) return true;
+    const parsed = new Date(`${monthKey}-01T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return true;
+
+    const expectedMonthLabel = parsed.toLocaleString("id-ID", { month: "long" }).toLowerCase();
+    const expectedYear = String(parsed.getFullYear());
+    const summaryMonth = String(summary.month || "").trim().toLowerCase();
+    const summaryYear = String(summary.year || "").trim();
+
+    return summaryMonth === expectedMonthLabel && summaryYear === expectedYear;
+}
 
 const toTimestamp = (value: unknown): number => {
     if (typeof value !== "string") return 0;
@@ -77,6 +106,10 @@ export default function SummaryPage() {
     const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
     const [errorModal, setErrorModal] = useState<ModalProps | null>(null);
     const [confirmModal, setConfirmModal] = useState<ModalProps | null>(null);
+    const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonthKey());
+
+    const currentMonthKey = useMemo(() => getCurrentMonthKey(), []);
+    const selectedMonthLabel = useMemo(() => formatMonthLabel(selectedMonth), [selectedMonth]);
 
     const formattedSavedAt = useMemo(
         () =>
@@ -96,7 +129,8 @@ export default function SummaryPage() {
         try {
             const result = await fetchAllMonthlySummaries();
             const items = Array.isArray(result?.data) ? (result.data as SummaryItem[]) : [];
-            const latest = pickLatestSummaryRecord(items);
+            const filteredByMonth = items.filter((item) => doesSummaryMatchMonth(item, selectedMonth));
+            const latest = pickLatestSummaryRecord(filteredByMonth);
 
             if (!latest) {
                 setResponse(null);
@@ -116,7 +150,7 @@ export default function SummaryPage() {
         } catch {
             // Keep current UI state if backend fetch temporarily fails.
         }
-    }, []);
+    }, [selectedMonth]);
 
     const loadForecastFromBackend = useCallback(async () => {
         setForecastLoading(true);
@@ -140,46 +174,19 @@ export default function SummaryPage() {
     }, [loadForecastFromBackend, loadLatestSummaryFromBackend]);
 
     const buildLiveFinancialPayload = async (): Promise<FinancialAIGenerateRequestPayload> => {
-        const fetchAllTransactionsForPayload = async (): Promise<Transaction[]> => {
-            const limit = 100;
-            let page = 1;
-            let totalPages = 1;
-            const items: Transaction[] = [];
-            const now = new Date();
-            const earliestDateToKeep = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-
-            do {
-                const res = await fetchTransaction(page, limit, "");
-                const data: Transaction[] = Array.isArray(res?.data)
-                    ? (res.data as Transaction[])
-                    : [];
-                items.push(...data);
-
-                const nextTotalPages = Number(
-                    res?.pagination?.totalPage ?? res?.pagination?.totalPages
-                );
-                totalPages = Number.isFinite(nextTotalPages) && nextTotalPages > 0 ? nextTotalPages : 1;
-                page += 1;
-
-                const oldestDateInPage = data.reduce((oldest: Date | null, tx: Transaction) => {
-                    const parsed = new Date(tx.date);
-                    if (Number.isNaN(parsed.getTime())) return oldest;
-                    if (!oldest || parsed < oldest) return parsed;
-                    return oldest;
-                }, null);
-
-                if (oldestDateInPage && oldestDateInPage < earliestDateToKeep) break;
-                if (page > 36) break; // guard: maksimum 3600 transaksi dalam satu payload
-            } while (page <= totalPages);
-
-            return items;
-        };
-
-        const [summaryRes, chartRes, allTransactions] = await Promise.all([
-            fetchMonthlySummary(),
-            fetchMonthlyChart(),
-            fetchAllTransactionsForPayload(),
+        const [summaryRes, chartRes] = await Promise.all([
+            fetchMonthlySummary(selectedMonth),
+            fetchMonthlyChart(selectedMonth),
         ]);
+
+        const payloadPeriodMonth =
+            typeof summaryRes?.data?.period_month === "string" && summaryRes.data.period_month
+                ? summaryRes.data.period_month
+                : selectedMonth;
+        const transactionRes = await fetchTransaction(1, 5000, "", payloadPeriodMonth);
+        const allTransactions: Transaction[] = Array.isArray(transactionRes?.data)
+            ? (transactionRes.data as Transaction[])
+            : [];
 
         const payload = buildFinancialAIGenerateRequestPayload({
             summary: summaryRes?.data || null,
@@ -188,7 +195,7 @@ export default function SummaryPage() {
             source: "summary_page_generate",
         });
 
-        localStorage.setItem(FINANCIAL_PAYLOAD_STORAGE_KEY, JSON.stringify(payload));
+        localStorage.setItem(`${FINANCIAL_PAYLOAD_STORAGE_KEY}_${payloadPeriodMonth}`, JSON.stringify(payload));
         return payload;
     }
 
@@ -196,12 +203,12 @@ export default function SummaryPage() {
         try {
             return await buildLiveFinancialPayload();
         } catch {
-            const cached = localStorage.getItem(FINANCIAL_PAYLOAD_STORAGE_KEY);
+            const cached = localStorage.getItem(`${FINANCIAL_PAYLOAD_STORAGE_KEY}_${selectedMonth}`);
             if (cached) {
                 const parsed: unknown = JSON.parse(cached);
                 if (isValidFinancialPayload(parsed)) return parsed;
             }
-            throw new Error("Gagal menyiapkan payload data_keuangan. Coba buka dashboard terlebih dulu, lalu generate lagi.");
+            throw new Error("Gagal menyiapkan payload data_keuangan untuk bulan terpilih. Coba refresh lalu generate lagi.");
         }
     }
 
@@ -209,7 +216,7 @@ export default function SummaryPage() {
         setLoading(true);
         try {
             const financialPayload = await getFinancialPayloadForGenerate();
-            const result = await generateMonthlySummary(financialPayload);
+            const result = await generateMonthlySummary(financialPayload, selectedMonth);
 
             if(result.success && result.data) {
                 const generatedResponse = normalizeGeneratedSummaryPayload(result.data);
@@ -260,7 +267,7 @@ export default function SummaryPage() {
         ) || [];
 
     return (
-        <div className="mx-auto w-full min-w-0 max-w-6xl space-y-6 p-4 md:p-6">
+        <div className="space-y-6">
             <section className="relative overflow-hidden rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-600 via-indigo-500 to-blue-500 text-white shadow-lg">
                 <div className="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-white/20 blur-2xl" />
                 <div className="absolute -bottom-20 left-10 h-44 w-44 rounded-full bg-cyan-300/20 blur-2xl" />
@@ -270,6 +277,18 @@ export default function SummaryPage() {
                         <p className="max-w-2xl text-sm text-indigo-50 md:text-base">
                             Dapatkan ringkasan, rekomendasi, analisis tren, dan forecast finansial bulan berikutnya.
                         </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[11px] font-medium text-indigo-100">Bulan analisis</span>
+                            <MonthPicker
+                                value={selectedMonth}
+                                onChange={setSelectedMonth}
+                                max={currentMonthKey}
+                                theme="glass"
+                            />
+                            <span className="rounded-full border border-white/35 bg-white/15 px-2.5 py-1 text-[11px] text-indigo-50">
+                                {selectedMonthLabel}
+                            </span>
+                        </div>
                         {formattedSavedAt && (
                             <div className="inline-flex items-center gap-2 rounded-full border border-white/35 bg-white/15 px-3 py-1 text-xs">
                                 <FaClock className="h-3 w-3" />
@@ -434,7 +453,7 @@ export default function SummaryPage() {
                         <FaRobot className="h-5 w-5" />
                     </div>
                     <p className="text-sm text-slate-600">
-                        Klik tombol <b>&quot;Generate Summary&quot;</b> untuk mendapatkan analisis otomatis.
+                        Klik tombol <b>&quot;Generate Summary&quot;</b> untuk menganalisis bulan {selectedMonthLabel}.
                     </p>
                 </div>
             )}

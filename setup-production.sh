@@ -4,7 +4,7 @@ set -Eeuo pipefail
 DOMAIN="${DOMAIN:-financial.seribuweb.site}"
 VPS_IP="${VPS_IP:-194.238.16.13}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-admin@${DOMAIN}}"
-APP_DIR="${APP_DIR:-/opt/financial-app}"
+APP_DIR="${APP_DIR:-/![1772213393694](image/setup-production/1772213393694.png)/financial-app}"
 
 FRONTEND_DIR="budget-tracker-frontend-final-main"
 BACKEND_DIR="budget-tracker-backend-final"

@@ -4,6 +4,7 @@
 :root {
   --font-sans: var(--font-poppins);
   --font-mono: var(--font-geist-mono);
+  --dashboard-sidebar-width: 21.5rem;
 }
 
 /* Apply theme */

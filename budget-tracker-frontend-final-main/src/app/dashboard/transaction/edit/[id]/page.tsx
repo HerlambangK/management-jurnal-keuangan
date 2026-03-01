@@ -88,7 +88,7 @@ export default function EditTransactionPage() {
     if (isInvalidId) return <>Invalid Transaction ID</>;
 
     return (
-        <div className="space-y-5 p-4 md:p-6">
+        <div className="space-y-6">
             <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-600 to-indigo-500 p-5 text-white shadow-lg">
                 <h1 className="text-2xl font-bold">Edit Transaksi</h1>
                 <p className="mt-1 text-sm text-indigo-50">
