@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FaArrowDown,
   FaArrowLeft,
@@ -127,7 +127,7 @@ export default function TransactionPage() {
   const currentMonthKey = useMemo(() => getCurrentMonthKey(), []);
   const selectedMonthLabel = useMemo(() => formatMonthLabel(selectedMonth), [selectedMonth]);
 
-  const loadTransaction = async () => {
+  const loadTransaction = useCallback(async () => {
     setIsLoadingTable(true);
     try {
       const res = await fetchTransaction(page, limit, search, selectedMonth);
@@ -142,9 +142,9 @@ export default function TransactionPage() {
     } finally {
       setIsLoadingTable(false);
     }
-  };
+  }, [page, limit, search, selectedMonth]);
 
-  const loadFinancialOverview = async () => {
+  const loadFinancialOverview = useCallback(async () => {
     try {
       const res = await fetchFinancialOverview(selectedMonth);
       setFinancialOverview(res?.data || null);
@@ -155,15 +155,15 @@ export default function TransactionPage() {
         console.error({ message: "Terjadi Kesalahan", type: "danger" });
       }
     }
-  };
+  }, [selectedMonth]);
 
   useEffect(() => {
     void loadTransaction();
-  }, [page, search, limit, selectedMonth]);
+  }, [loadTransaction]);
 
   useEffect(() => {
     void loadFinancialOverview();
-  }, [selectedMonth]);
+  }, [loadFinancialOverview]);
 
   useEffect(() => {
     if (!formMode) return;

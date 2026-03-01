@@ -283,7 +283,6 @@ export default function DashboardPage() {
   const income = toSafeNumber(summary?.income);
   const expense = toSafeNumber(summary?.expense);
   const saving = toSafeNumber(summary?.saving);
-  const balance = toSafeNumber(summary?.balance);
   const remainingMoney = income - expense;
   const expenseRatio = income > 0 ? (expense / income) * 100 : 0;
 

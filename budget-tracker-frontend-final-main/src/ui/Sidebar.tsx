@@ -224,7 +224,7 @@ const Sidebar = () => {
           if (isMounted && typeof parsed === "object" && parsed !== null) {
             applyUserState(parsed as Partial<ProfileData>);
           }
-        } catch (_error) {
+        } catch {
           // ignore invalid cache
         }
       }
@@ -260,7 +260,7 @@ const Sidebar = () => {
       if (savedPreference === "1") {
         setIsDesktopCollapsed(true);
       }
-    } catch (_error) {
+    } catch {
       // ignore localStorage read failure
     }
   }, []);
@@ -272,7 +272,7 @@ const Sidebar = () => {
 
     try {
       localStorage.setItem(DESKTOP_SIDEBAR_COLLAPSED_KEY, isDesktopCollapsed ? "1" : "0");
-    } catch (_error) {
+    } catch {
       // ignore localStorage write failure
     }
   }, [isDesktopCollapsed]);
@@ -379,6 +379,7 @@ const Sidebar = () => {
   const renderAvatar = (sizeClass: string) => {
     if (avatarUrl) {
       return (
+        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={avatarUrl}
           alt="Avatar"
@@ -560,6 +561,7 @@ const Sidebar = () => {
             className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50 transition hover:bg-slate-100"
           >
             {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
               <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" onError={() => setAvatarUrl(null)} />
             ) : (
               <span className="text-xs font-semibold text-slate-600">{initial}</span>
@@ -688,6 +690,7 @@ const Sidebar = () => {
             aria-label="Buka profil"
           >
             {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={avatarUrl}
                 alt="Avatar"

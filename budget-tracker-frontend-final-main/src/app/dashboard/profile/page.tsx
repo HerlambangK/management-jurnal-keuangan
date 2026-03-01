@@ -141,7 +141,7 @@ export default function ProfilePage() {
           sessions: nextSessions,
         })
       );
-    } catch (_error) {
+    } catch {
       // ignore invalid cache
     }
   };
@@ -173,7 +173,7 @@ export default function ProfilePage() {
             if (parsed && typeof parsed === "object") {
               applyProfileState(parsed as Parameters<typeof applyProfileState>[0]);
             }
-          } catch (_error) {
+          } catch {
             // ignore invalid cache
           }
         }
@@ -194,7 +194,7 @@ export default function ProfilePage() {
           : profileData?.sessions || [];
         setSessions(latestSessions);
         syncCachedSessions(latestSessions);
-      } catch (_sessionError) {
+      } catch {
         // Keep sessions from profile response if dedicated request fails
       } finally {
         setLoading(false);
@@ -250,7 +250,7 @@ export default function ProfilePage() {
 
       setAvatarPreview(asDataUrl);
       setAvatarBase64(asDataUrl);
-    } catch (_error) {
+    } catch {
       setModal({
         type: "danger",
         title: "Gagal Membaca File",
@@ -411,6 +411,7 @@ export default function ProfilePage() {
             <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
               <div className="flex size-24 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
                 {avatarPreview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={avatarPreview}
                     alt="Foto profil"
