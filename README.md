@@ -10,7 +10,7 @@
 cp .env.example .env
 cp budget-tracker-backend-final/.env.example budget-tracker-backend-final/.env
 cp budget-tracker-frontend-final-main/.env.example budget-tracker-frontend-final-main/.env
-
+cp
 # sesuaikan password/secret pada file .env
 sudo bash ./setup-production.sh
 ```
