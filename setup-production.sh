@@ -4,7 +4,7 @@ set -Eeuo pipefail
 DOMAIN="${DOMAIN:-financial.seribuweb.site}"
 VPS_IP="${VPS_IP:-194.238.16.13}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-admin@${DOMAIN}}"
-APP_DIR="${APP_DIR:-/![1772213393694](image/setup-production/1772213393694.png)/financial-app}"
+APP_DIR="${APP_DIR:-/opt/financial-app}"
 
 FRONTEND_DIR="budget-tracker-frontend-final-main"
 BACKEND_DIR="budget-tracker-backend-final"
@@ -286,7 +286,7 @@ EOF
 
 echo "[1/12] Install package dasar"
 apt-get update -y
-apt-get install -y ca-certificates curl gnupg lsb-release ufw openssl
+apt-get install -y ca-certificates curl gnupg lsb-release ufw openssl git
 
 install_docker
 systemctl enable --now docker
@@ -332,8 +332,15 @@ echo "[8/12] Start MySQL dan tunggu healthy"
 docker compose up -d mysql
 docker compose ps mysql
 
+echo "[8b/12] Pastikan database tersedia"
+docker compose exec -T mysql sh -lc "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"CREATE DATABASE IF NOT EXISTS \\\`\$MYSQL_DATABASE\\\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\""
+docker compose exec -T mysql sh -lc "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"SHOW DATABASES LIKE '\$MYSQL_DATABASE';\""
+
 echo "[9/12] Jalankan migrasi database"
 docker compose --profile tools run --rm migrator
+
+echo "[9b/12] Jalankan seeder database"
+docker compose --profile tools run --rm seeder
 
 echo "[10/12] Build + start backend/frontend/nginx"
 docker compose up -d --build backend frontend nginx
@@ -381,3 +388,5 @@ echo "1) docker compose ps"
 echo "2) docker compose logs --tail=80 mysql backend nginx"
 echo "3) curl -I https://${DOMAIN}"
 echo "4) curl -I https://${DOMAIN}/api/v1/auth/profile"
+echo "5) docker compose exec -T mysql sh -lc 'mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"SHOW DATABASES LIKE '\''\$MYSQL_DATABASE'\'';\"'"
+echo "6) docker compose --profile tools run --rm migrator npm run migrate:status"

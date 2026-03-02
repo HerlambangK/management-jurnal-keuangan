@@ -2,77 +2,89 @@
 
 module.exports = {
   async up(queryInterface, Sequelize) {
-    await queryInterface.bulkInsert('categories', [
+    const defaultCategories = [
       {
         name: 'Gaji',
         description: 'Penghasilan dari pekerjaan tetap',
-        created_at: new Date(),
-        updated_at: new Date(),
       },
       {
         name: 'Makanan & Minuman',
         description: 'Belanja makan harian dan jajan',
-        created_at: new Date(),
-        updated_at: new Date(),
       },
       {
         name: 'Transportasi',
         description: 'Ongkos transportasi dan bahan bakar',
-        created_at: new Date(),
-        updated_at: new Date(),
       },
       {
         name: 'Tempat Tinggal',
         description: 'Sewa, listrik, dan air',
-        created_at: new Date(),
-        updated_at: new Date(),
       },
       {
         name: 'Hiburan',
         description: 'Streaming, game, atau liburan',
-        created_at: new Date(),
-        updated_at: new Date(),
       },
       {
         name: 'Belanja',
         description: 'Belanja pakaian dan kebutuhan pribadi',
-        created_at: new Date(),
-        updated_at: new Date(),
       },
       {
         name: 'Freelance',
         description: 'Penghasilan dari pekerjaan lepas',
-        created_at: new Date(),
-        updated_at: new Date(),
       },
       {
         name: 'Pendidikan',
         description: 'Buku dan biaya kursus',
-        created_at: new Date(),
-        updated_at: new Date(),
       },
       {
         name: 'Investasi',
         description: 'Dana untuk saham atau reksadana',
-        created_at: new Date(),
-        updated_at: new Date(),
       },
       {
         name: 'Donasi',
         description: 'Zakat dan sumbangan sosial',
-        created_at: new Date(),
-        updated_at: new Date(),
       },
       {
         name: 'Lainnya',
         description: 'Kategori tidak terdefinisi',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }
-    ]);
+      },
+    ];
+
+    const [existingRows] = await queryInterface.sequelize.query(
+      'SELECT name FROM categories'
+    );
+    const existingNames = new Set((existingRows || []).map((row) => row.name));
+
+    const now = new Date();
+    const categoriesToInsert = defaultCategories
+      .filter((category) => !existingNames.has(category.name))
+      .map((category) => ({
+        ...category,
+        created_at: now,
+        updated_at: now,
+      }));
+
+    if (categoriesToInsert.length === 0) {
+      return;
+    }
+
+    await queryInterface.bulkInsert('categories', categoriesToInsert);
   },
 
   async down(queryInterface, Sequelize) {
-    await queryInterface.bulkDelete('categories', null, {});
+    await queryInterface.bulkDelete('categories', {
+      name: [
+        'Gaji',
+        'Makanan & Minuman',
+        'Transportasi',
+        'Tempat Tinggal',
+        'Hiburan',
+        'Belanja',
+        'Freelance',
+        'Pendidikan',
+        'Investasi',
+        'Donasi',
+        'Lainnya',
+      ],
+    });
   }
 };

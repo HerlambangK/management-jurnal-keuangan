@@ -1,6 +1,7 @@
 # jurnal-keuangan
 
 ## Deployment
+- Tutorial Hostinger VPS + CI/CD: [deploy/HOSTINGER_VPS_STEP_BY_STEP.md](deploy/HOSTINGER_VPS_STEP_BY_STEP.md)
 - Setup production VPS: [deploy/PRODUCTION_DEPLOY.md](deploy/PRODUCTION_DEPLOY.md)
 - Setup CI/CD GitHub Actions: [deploy/GITHUB_CICD_SETUP.md](deploy/GITHUB_CICD_SETUP.md)
 

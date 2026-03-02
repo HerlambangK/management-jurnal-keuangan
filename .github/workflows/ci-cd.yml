@@ -70,6 +70,16 @@ jobs:
               APP_DIR="/opt/financial-app"
             fi
 
+            REPO_URL="${{ secrets.VPS_REPO_URL }}"
+            if [ -z "${REPO_URL}" ]; then
+              REPO_URL="https://github.com/HerlambangK/management-jurnal-keuangan.git"
+            fi
+
+            if [ ! -d "${APP_DIR}/.git" ]; then
+              mkdir -p "$(dirname "${APP_DIR}")"
+              git clone "${REPO_URL}" "${APP_DIR}"
+            fi
+
             cd "${APP_DIR}"
             git fetch origin main
             git checkout main

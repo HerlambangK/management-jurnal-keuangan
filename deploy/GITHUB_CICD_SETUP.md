@@ -1,63 +1,78 @@
 # GitHub Actions CI/CD Setup
 
 Tujuan:
-- Setiap push ke `main` akan menjalankan CI.
-- Jika CI sukses, server VPS otomatis pull update, migrasi DB, dan redeploy Docker.
+- Setiap `pull_request` ke `main` menjalankan CI.
+- Setiap `push` ke `main` menjalankan CI lalu deploy otomatis ke VPS.
 
-## 1. Persiapan di VPS (sekali saja)
-Jalankan setup produksi dulu:
+Workflow file:
+- `.github/workflows/ci-cd.yml`
+
+## 1) Prasyarat di VPS
+
+Pastikan deploy manual pertama sudah berhasil:
 
 ```bash
 cd /opt/financial-app
 sudo bash ./setup-production.sh
 ```
 
-Pastikan repo di VPS ada di path:
-- `/opt/financial-app`
+Jika belum punya folder project:
 
-Jika beda path, nanti isi di secret `VPS_APP_DIR`.
+```bash
+mkdir -p /opt
+cd /opt
+git clone https://github.com/HerlambangK/management-jurnal-keuangan.git financial-app
+```
 
-## 2. Buat SSH key untuk GitHub Actions
-Di laptop lokal:
+## 2) Buat SSH key khusus GitHub Actions
+
+Di lokal:
 
 ```bash
 ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/github_actions_deploy
 ```
 
-Tambahkan public key ke VPS:
+Daftarkan public key ke VPS:
 
 ```bash
-ssh-copy-id -i ~/.ssh/github_actions_deploy.pub <user>@194.238.16.13
+ssh-copy-id -i ~/.ssh/github_actions_deploy.pub root@194.238.16.13
 ```
 
-## 3. Tambah GitHub Secrets
+## 3) Tambahkan repository secrets
+
 Di GitHub repo -> `Settings` -> `Secrets and variables` -> `Actions`:
 
 - `VPS_HOST` = `194.238.16.13`
-- `VPS_USER` = user ssh di server (contoh: `ubuntu`)
+- `VPS_USER` = `root` (atau user deploy)
 - `VPS_PORT` = `22`
 - `VPS_SSH_KEY` = isi private key `~/.ssh/github_actions_deploy`
 - `VPS_APP_DIR` = `/opt/financial-app`
+- `VPS_REPO_URL` = `https://github.com/HerlambangK/management-jurnal-keuangan.git`
 
-## 4. Workflow yang digunakan
-File workflow:
-- `.github/workflows/ci-cd.yml`
+`VPS_REPO_URL` opsional, tapi direkomendasikan untuk first deploy otomatis jika folder app belum ada.
 
-Alur:
-1. CI build frontend + syntax check backend.
-2. Jika push ke `main` dan CI sukses -> SSH ke VPS.
-3. VPS menjalankan:
-   - `git pull --ff-only origin main`
+## 4) Alur CI/CD di workflow
+
+1. Checkout source.
+2. Install dependency frontend + build production frontend.
+3. Install dependency backend + syntax check backend.
+4. Jika push ke `main`, workflow SSH ke VPS.
+5. Di VPS workflow menjalankan:
+   - auto clone repo jika `${VPS_APP_DIR}` belum ada
+   - `git fetch`, `git checkout main`, `git pull --ff-only origin main`
    - `bash ./deploy/server-deploy.sh`
 
-`server-deploy.sh` sudah mencakup:
-- start service MySQL
-- run migrasi (`docker compose --profile tools run --rm migrator`)
-- redeploy backend/frontend/nginx
-- validasi reload nginx
+`server-deploy.sh` melakukan:
+- start MySQL
+- memastikan database `${MYSQL_DATABASE}` tersedia
+- run migrasi DB
+- run seeder DB
+- deploy backend/frontend/nginx
+- reload nginx
 
-## 5. Test pipeline
-Commit kecil lalu push:
+## 5) Test pipeline
+
+Push commit kecil ke `main`:
 
 ```bash
 git add .
@@ -65,8 +80,8 @@ git commit -m "test: trigger ci cd"
 git push origin main
 ```
 
-Lihat hasil:
-- GitHub -> `Actions`
+Cek:
+- GitHub -> `Actions` -> pastikan job `ci` dan `deploy` hijau.
 - VPS:
 
 ```bash
@@ -75,7 +90,8 @@ docker compose ps
 docker compose logs --tail=100 nginx frontend backend
 ```
 
-## 6. Rollback cepat jika deploy bermasalah
+## 6) Rollback cepat jika deploy bermasalah
+
 Di VPS:
 
 ```bash

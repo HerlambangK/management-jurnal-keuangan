@@ -96,11 +96,12 @@ sudo bash ./setup-production.sh
 Script akan:
 1. Install Docker + Compose + UFW.
 2. Buka port `OpenSSH`, `80`, `443`.
-3. Start MySQL.
+3. Start MySQL + memastikan database `${MYSQL_DATABASE}` tersedia.
 4. Jalankan migrasi DB (`npm run migrate`) via service `migrator`.
-5. Build/start backend, frontend, nginx.
-6. Issue SSL Let's Encrypt.
-7. Setup auto-renew certbot harian.
+5. Jalankan seeder DB (`npm run seed`) via service `seeder`.
+6. Build/start backend, frontend, nginx.
+7. Issue SSL Let's Encrypt.
+8. Setup auto-renew certbot harian.
 
 ## 7) Deploy update berikutnya (CI/CD atau manual)
 
@@ -111,9 +112,11 @@ bash ./deploy/server-deploy.sh
 
 Script deploy akan:
 1. start/update MySQL
-2. jalankan migrasi
-3. build+redeploy backend/frontend/nginx
-4. validasi dan reload nginx
+2. pastikan database `${MYSQL_DATABASE}` tersedia
+3. jalankan migrasi
+4. jalankan seeder
+5. build+redeploy backend/frontend/nginx
+6. validasi dan reload nginx
 
 ## 8) Verifikasi wajib
 
@@ -122,6 +125,13 @@ docker compose ps
 docker compose logs --tail=120 mysql backend nginx
 curl -I https://financial.seribuweb.site
 curl -I https://financial.seribuweb.site/api/v1/auth/profile
+
+# cek database aktif
+docker compose exec -T mysql sh -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "SHOW DATABASES;"'
+
+# cek status migrasi dan seeder
+docker compose --profile tools run --rm migrator npm run migrate:status
+docker compose --profile tools run --rm seeder npm run seed
 ```
 
 Verifikasi sertifikat:
