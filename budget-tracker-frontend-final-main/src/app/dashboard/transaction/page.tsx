@@ -114,6 +114,7 @@ export default function TransactionPage() {
   const [financialOverview, setFinancialOverview] = useState<FinancialOverviewData | null>(null);
   const [modal, setModal] = useState<ModalProps | null>(null);
   const [isLoadingTable, setIsLoadingTable] = useState(false);
+  const [isLoadingOverview, setIsLoadingOverview] = useState(false);
   const [sortBy, setSortBy] = useState<SortField>("date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -145,6 +146,7 @@ export default function TransactionPage() {
   }, [page, limit, search, selectedMonth]);
 
   const loadFinancialOverview = useCallback(async () => {
+    setIsLoadingOverview(true);
     try {
       const res = await fetchFinancialOverview(selectedMonth);
       setFinancialOverview(res?.data || null);
@@ -154,6 +156,8 @@ export default function TransactionPage() {
       } else {
         console.error({ message: "Terjadi Kesalahan", type: "danger" });
       }
+    } finally {
+      setIsLoadingOverview(false);
     }
   }, [selectedMonth]);
 
@@ -382,10 +386,39 @@ export default function TransactionPage() {
     [transaction]
   );
 
-  const monthlyIncome = useMemo(() => Number(financialOverview?.monthly_income || 0), [financialOverview]);
-  const accumulatedBalance = useMemo(() => Number(financialOverview?.closing_balance || 0), [financialOverview]);
-  const monthlyNetBalance = useMemo(() => Number(financialOverview?.monthly_balance || 0), [financialOverview]);
-  const openingBalance = useMemo(() => Number(financialOverview?.opening_balance || 0), [financialOverview]);
+  const ledgerOverview = useMemo(() => {
+    const ledger = financialOverview?.ledger;
+
+    if (ledger) {
+      return {
+        openingBalance: Number(ledger.opening_balance || 0),
+        debit: Number(ledger.debit || 0),
+        credit: Number(ledger.credit || 0),
+        netChange: Number(ledger.net_change || 0),
+        closingBalance: Number(ledger.closing_balance || 0),
+      };
+    }
+
+    const debit = Number(financialOverview?.monthly_debit ?? financialOverview?.monthly_income ?? 0);
+    const credit = Number(financialOverview?.monthly_credit ?? financialOverview?.monthly_expense ?? 0);
+    const openingBalance = Number(financialOverview?.opening_balance ?? 0);
+    const netChange = Number(financialOverview?.monthly_balance ?? debit - credit);
+    const closingBalance = Number(financialOverview?.closing_balance ?? openingBalance + netChange);
+
+    return {
+      openingBalance,
+      debit,
+      credit,
+      netChange,
+      closingBalance,
+    };
+  }, [financialOverview]);
+
+  const monthlyIncome = ledgerOverview.debit;
+  const monthlyExpense = ledgerOverview.credit;
+  const monthlyNetBalance = ledgerOverview.netChange;
+  const openingBalance = ledgerOverview.openingBalance;
+  const accumulatedBalance = ledgerOverview.closingBalance;
 
   const incomeTrend = useMemo(
     () =>
@@ -459,6 +492,12 @@ export default function TransactionPage() {
       </section>
 
       <section className="grid gap-4 xl:grid-cols-12">
+        {isLoadingOverview && (
+          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 xl:col-span-12">
+            Memuat ringkasan ledger...
+          </div>
+        )}
+
         <div className="h-full rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 p-4 shadow-sm xl:col-span-4">
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-700">Akumulasi Saldo</p>
@@ -485,20 +524,27 @@ export default function TransactionPage() {
           </div>
         </div>
 
-        <div className="h-full rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm xl:col-span-4">
+        <div className="h-full rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm xl:col-span-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-700">Pemasukan Bulanan</p>
-            <FaArrowUp className="h-4 w-4 text-emerald-600" />
+            <p className="text-sm font-semibold text-slate-700">Ledger Bulanan (Debit/Kredit)</p>
+            <FaChartLine className="h-4 w-4 text-amber-600" />
           </div>
-          <p className="mt-2 text-2xl font-bold text-emerald-600">{formatRupiah(monthlyIncome)}</p>
-          <p className="mt-2 text-xs text-slate-500">
-            Hanya menampilkan total pemasukan pada periode {selectedMonthLabel} agar fokus analisis pendapatan.
+          <p className={`mt-2 text-2xl font-bold ${monthlyNetBalance >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+            {monthlyNetBalance >= 0 ? "+ " : "- "}
+            {formatRupiah(Math.abs(monthlyNetBalance))}
           </p>
-          <div className="mt-3 rounded-lg border border-emerald-100 bg-white px-3 py-2 text-xs">
-            <p className="text-slate-500">Jumlah transaksi pemasukan</p>
-            <p className="mt-1 font-semibold text-emerald-600">
-              {financialOverview?.income_transaction_count || 0} transaksi
-            </p>
+          <p className="mt-2 text-xs text-slate-500">
+            Debit = pemasukan, kredit = pengeluaran pada periode {selectedMonthLabel}.
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div className="rounded-lg border border-emerald-100 bg-white px-2 py-2">
+              <p className="text-slate-500">Debit (Masuk)</p>
+              <p className="mt-1 font-semibold text-emerald-600">{formatRupiah(monthlyIncome)}</p>
+            </div>
+            <div className="rounded-lg border border-rose-100 bg-white px-2 py-2">
+              <p className="text-slate-500">Kredit (Keluar)</p>
+              <p className="mt-1 font-semibold text-rose-600">{formatRupiah(monthlyExpense)}</p>
+            </div>
           </div>
         </div>
 
@@ -507,7 +553,7 @@ export default function TransactionPage() {
             <p className="text-sm font-semibold text-slate-700">Aktivitas Bulanan</p>
             <FaReceipt className="h-4 w-4 text-indigo-500" />
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className="mt-3 grid grid-cols-3 gap-2">
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-center">
               <p className="text-[11px] text-slate-500">Total Transaksi</p>
               <p className="mt-1 text-lg font-bold text-slate-700">{financialOverview?.monthly_transaction_count || 0}</p>
@@ -515,6 +561,10 @@ export default function TransactionPage() {
             <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-2 py-2 text-center">
               <p className="text-[11px] text-emerald-600">Transaksi Masuk</p>
               <p className="mt-1 text-lg font-bold text-emerald-600">{financialOverview?.income_transaction_count || 0}</p>
+            </div>
+            <div className="rounded-lg border border-rose-100 bg-rose-50 px-2 py-2 text-center">
+              <p className="text-[11px] text-rose-600">Transaksi Keluar</p>
+              <p className="mt-1 text-lg font-bold text-rose-600">{financialOverview?.expense_transaction_count || 0}</p>
             </div>
           </div>
           <p className="mt-3 text-xs text-slate-500">

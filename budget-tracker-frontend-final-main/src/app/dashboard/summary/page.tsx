@@ -6,7 +6,6 @@ import {
     fetchAllMonthlySummaries,
     fetchMonthlySummaryForecast,
     generateMonthlySummary,
-    normalizeGeneratedSummaryPayload,
     normalizeStoredSummaryRecordToLLMResponse,
 } from "@/services/monthlySummary";
 import Modal from "@/ui/Modal";
@@ -98,9 +97,69 @@ const isValidFinancialPayload = (value: unknown): value is FinancialAIGenerateRe
     );
 }
 
+const SkeletonBar = ({ className }: { className: string }) => (
+    <div className={`animate-pulse rounded-md bg-slate-200 ${className}`} />
+);
+
+const ForecastLoadingSkeleton = () => (
+    <div className="space-y-4">
+        <SkeletonBar className="h-4 w-3/4" />
+        <div className="grid gap-3 md:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, idx) => (
+                <div key={idx} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                    <SkeletonBar className="h-3 w-1/2" />
+                    <SkeletonBar className="mt-2 h-5 w-2/3" />
+                    <SkeletonBar className="mt-2 h-3 w-full" />
+                </div>
+            ))}
+        </div>
+        <SkeletonBar className="h-10 w-full" />
+        <div className="space-y-2">
+            <SkeletonBar className="h-8 w-full" />
+            <SkeletonBar className="h-8 w-full" />
+            <SkeletonBar className="h-8 w-5/6" />
+        </div>
+    </div>
+);
+
+const SummaryLoadingSkeleton = () => (
+    <section className="grid gap-4 lg:grid-cols-12">
+        <div className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm lg:col-span-7">
+            <SkeletonBar className="mb-4 h-5 w-40" />
+            <div className="space-y-2">
+                <SkeletonBar className="h-4 w-full" />
+                <SkeletonBar className="h-4 w-full" />
+                <SkeletonBar className="h-4 w-11/12" />
+                <SkeletonBar className="h-4 w-10/12" />
+                <SkeletonBar className="h-4 w-9/12" />
+            </div>
+        </div>
+
+        <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm lg:col-span-5">
+            <SkeletonBar className="mb-4 h-5 w-36" />
+            <div className="space-y-2">
+                <SkeletonBar className="h-10 w-full" />
+                <SkeletonBar className="h-10 w-full" />
+                <SkeletonBar className="h-10 w-11/12" />
+            </div>
+        </div>
+
+        <div className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm lg:col-span-12">
+            <SkeletonBar className="mb-4 h-5 w-36" />
+            <div className="space-y-2">
+                <SkeletonBar className="h-4 w-full" />
+                <SkeletonBar className="h-4 w-full" />
+                <SkeletonBar className="h-4 w-11/12" />
+                <SkeletonBar className="h-4 w-10/12" />
+            </div>
+        </div>
+    </section>
+);
+
 export default function SummaryPage() {
     const [loading, setLoading] = useState<boolean>(false);
     const [forecastLoading, setForecastLoading] = useState<boolean>(true);
+    const [selectedMonthHasTransactions, setSelectedMonthHasTransactions] = useState<boolean>(false);
     const [response, setResponse] = useState<LLMResponse | null>(null);
     const [forecast, setForecast] = useState<MonthlySummaryForecast | null>(null);
     const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -155,7 +214,7 @@ export default function SummaryPage() {
     const loadForecastFromBackend = useCallback(async () => {
         setForecastLoading(true);
         try {
-            const result = await fetchMonthlySummaryForecast();
+            const result = await fetchMonthlySummaryForecast(true);
             if (result?.success && result.data) {
                 setForecast(result.data as MonthlySummaryForecast);
             } else {
@@ -169,9 +228,47 @@ export default function SummaryPage() {
     }, []);
 
     useEffect(() => {
-        void loadLatestSummaryFromBackend();
-        void loadForecastFromBackend();
-    }, [loadForecastFromBackend, loadLatestSummaryFromBackend]);
+        setResponse(null);
+        setLastSavedAt(null);
+        setForecast(null);
+        setForecastLoading(true);
+        setSelectedMonthHasTransactions(false);
+
+        let cancelled = false;
+
+        const initializeMonthState = async () => {
+            try {
+                const transactionRes = await fetchTransaction(1, 1, "", selectedMonth);
+                const hasTransactions =
+                    Array.isArray(transactionRes?.data) && transactionRes.data.length > 0;
+
+                if (cancelled) return;
+
+                setSelectedMonthHasTransactions(hasTransactions);
+
+                if (!hasTransactions) {
+                    setForecast(null);
+                    setForecastLoading(false);
+                    return;
+                }
+
+                await Promise.all([
+                    loadLatestSummaryFromBackend(),
+                    loadForecastFromBackend(),
+                ]);
+            } catch {
+                if (cancelled) return;
+                setForecast(null);
+                setForecastLoading(false);
+            }
+        };
+
+        void initializeMonthState();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedMonth, loadLatestSummaryFromBackend, loadForecastFromBackend]);
 
     const buildLiveFinancialPayload = async (): Promise<FinancialAIGenerateRequestPayload> => {
         const [summaryRes, chartRes] = await Promise.all([
@@ -219,12 +316,22 @@ export default function SummaryPage() {
             const result = await generateMonthlySummary(financialPayload, selectedMonth);
 
             if(result.success && result.data) {
-                const generatedResponse = normalizeGeneratedSummaryPayload(result.data);
+                const generatedResponse = result.data as LLMResponse;
                 setResponse(generatedResponse);
-                await Promise.all([
-                    loadLatestSummaryFromBackend(),
-                    loadForecastFromBackend(),
-                ]);
+                const isEmptyDataResponse =
+                    generatedResponse.ai_skipped_reason === "empty_data" ||
+                    generatedResponse.source === "empty_data";
+
+                if (isEmptyDataResponse) {
+                    setLastSavedAt(null);
+                    setSelectedMonthHasTransactions(false);
+                    setForecast(null);
+                    setForecastLoading(false);
+                } else {
+                    setSelectedMonthHasTransactions(true);
+                    await loadLatestSummaryFromBackend();
+                    void loadForecastFromBackend();
+                }
             } else {
                 throw new Error(result.message || "Gagal menghasilkan Ringkasan")
             }
@@ -265,6 +372,9 @@ export default function SummaryPage() {
         response?.recommendations?.filter(
             (item): item is string => typeof item === "string" && item.trim().length > 0
         ) || [];
+    const isEmptyDataResponse =
+        response?.ai_skipped_reason === "empty_data" ||
+        response?.source === "empty_data";
 
     return (
         <div className="space-y-6">
@@ -315,7 +425,7 @@ export default function SummaryPage() {
                 </div>
 
                 {forecastLoading ? (
-                    <p className="text-sm text-slate-500">Sedang menghitung perkiraan bulan depan...</p>
+                    <ForecastLoadingSkeleton />
                 ) : forecast ? (
                     <div className="space-y-4">
                         <p className="text-sm text-slate-600">
@@ -389,71 +499,107 @@ export default function SummaryPage() {
                     </div>
                 ) : (
                     <p className="text-sm text-slate-500">
-                        Data summary bulanan belum cukup untuk membuat forecast. Generate summary di beberapa bulan
-                        berbeda terlebih dulu.
+                        {selectedMonthHasTransactions
+                            ? "Data summary bulanan belum cukup untuk membuat forecast."
+                            : `Data bulan ${selectedMonthLabel} masih kosong. Forecast tidak dijalankan untuk bulan ini.`}
                     </p>
                 )}
             </section>
 
-            {response ? (
-                <section className="grid gap-4 lg:grid-cols-12">
-                    <div className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm lg:col-span-7">
-                        <div className="mb-3 flex items-center gap-2 text-indigo-700">
+            {loading ? (
+                <SummaryLoadingSkeleton />
+            ) : response ? (
+                isEmptyDataResponse ? (
+                    <section className="rounded-2xl border border-dashed border-amber-300 bg-amber-50/70 p-6 shadow-sm">
+                        <div className="mb-3 flex items-center gap-2 text-amber-700">
                             <FaRegFileAlt className="h-4 w-4" />
-                            <h3 className="text-base font-semibold">Ringkasan</h3>
+                            <h3 className="text-base font-semibold">Empty Data</h3>
                         </div>
                         <div
-                            className="text-sm leading-7 text-slate-700 [&_a]:text-indigo-600 [&_a]:underline [&_li]:ml-5 [&_li]:list-disc [&_p]:mb-2 [&_strong]:font-semibold"
+                            className="text-sm leading-7 text-slate-700 [&_p]:mb-2 [&_strong]:font-semibold"
                             dangerouslySetInnerHTML={getHtmlMarkup(response.summary)}
                         />
-                    </div>
-
-                    <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm lg:col-span-5">
-                        <div className="mb-3 flex items-center gap-2 text-emerald-700">
-                            <FaRegLightbulb className="h-4 w-4" />
-                            <h3 className="text-base font-semibold">Rekomendasi</h3>
-                        </div>
-                        {recommendations.length > 0 ? (
-                            <ul className="space-y-2">
+                        {recommendations.length > 0 && (
+                            <ul className="mt-3 space-y-2">
                                 {recommendations.map((rec, idx) => (
                                     <li
                                         key={`${rec}-${idx}`}
-                                        className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-slate-700"
+                                        className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-slate-700"
                                     >
-                                        <span className="mt-0.5 inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-semibold text-white">
-                                            {idx + 1}
-                                        </span>
+                                        <span className="font-semibold text-amber-700">{idx + 1}. </span>
                                         <span
-                                            className="[&_a]:text-emerald-700 [&_a]:underline [&_strong]:font-semibold"
+                                            className="[&_strong]:font-semibold"
                                             dangerouslySetInnerHTML={getHtmlMarkup(rec)}
                                         />
                                     </li>
                                 ))}
                             </ul>
-                        ) : (
-                            <p className="text-sm text-slate-500">Belum ada rekomendasi.</p>
                         )}
-                    </div>
-
-                    <div className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm lg:col-span-12">
-                        <div className="mb-3 flex items-center gap-2 text-amber-700">
-                            <FaChartLine className="h-4 w-4" />
-                            <h3 className="text-base font-semibold">Analisis Tren</h3>
+                        <p className="mt-4 text-xs text-slate-500">
+                            AI akan aktif otomatis setelah ada data transaksi pada bulan yang dipilih.
+                        </p>
+                    </section>
+                ) : (
+                    <section className="grid gap-4 lg:grid-cols-12">
+                        <div className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm lg:col-span-7">
+                            <div className="mb-3 flex items-center gap-2 text-indigo-700">
+                                <FaRegFileAlt className="h-4 w-4" />
+                                <h3 className="text-base font-semibold">Ringkasan</h3>
+                            </div>
+                            <div
+                                className="text-sm leading-7 text-slate-700 [&_a]:text-indigo-600 [&_a]:underline [&_li]:ml-5 [&_li]:list-disc [&_p]:mb-2 [&_strong]:font-semibold"
+                                dangerouslySetInnerHTML={getHtmlMarkup(response.summary)}
+                            />
                         </div>
-                        <div
-                            className="text-sm leading-7 text-slate-700 [&_a]:text-amber-700 [&_a]:underline [&_li]:ml-5 [&_li]:list-disc [&_p]:mb-2 [&_strong]:font-semibold"
-                            dangerouslySetInnerHTML={getHtmlMarkup(response.trend_analysis)}
-                        />
-                        <p className="mt-4 text-xs text-slate-400">Dianalisis otomatis berdasarkan data keuangan kamu.</p>
-                    </div>
-                </section>
+
+                        <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm lg:col-span-5">
+                            <div className="mb-3 flex items-center gap-2 text-emerald-700">
+                                <FaRegLightbulb className="h-4 w-4" />
+                                <h3 className="text-base font-semibold">Rekomendasi</h3>
+                            </div>
+                            {recommendations.length > 0 ? (
+                                <ul className="space-y-2">
+                                    {recommendations.map((rec, idx) => (
+                                        <li
+                                            key={`${rec}-${idx}`}
+                                            className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-slate-700"
+                                        >
+                                            <span className="mt-0.5 inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-semibold text-white">
+                                                {idx + 1}
+                                            </span>
+                                            <span
+                                                className="[&_a]:text-emerald-700 [&_a]:underline [&_strong]:font-semibold"
+                                                dangerouslySetInnerHTML={getHtmlMarkup(rec)}
+                                            />
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p className="text-sm text-slate-500">Belum ada rekomendasi.</p>
+                            )}
+                        </div>
+
+                        <div className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm lg:col-span-12">
+                            <div className="mb-3 flex items-center gap-2 text-amber-700">
+                                <FaChartLine className="h-4 w-4" />
+                                <h3 className="text-base font-semibold">Analisis Tren</h3>
+                            </div>
+                            <div
+                                className="text-sm leading-7 text-slate-700 [&_a]:text-amber-700 [&_a]:underline [&_li]:ml-5 [&_li]:list-disc [&_p]:mb-2 [&_strong]:font-semibold"
+                                dangerouslySetInnerHTML={getHtmlMarkup(response.trend_analysis)}
+                            />
+                            <p className="mt-4 text-xs text-slate-400">Dianalisis otomatis berdasarkan data keuangan kamu.</p>
+                        </div>
+                    </section>
+                )
             ) : (
-                <div className="rounded-2xl border border-dashed border-indigo-200 bg-white p-8 text-center shadow-sm">
-                    <div className="mx-auto mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100 text-indigo-700">
-                        <FaRobot className="h-5 w-5" />
+                <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50/70 p-8 text-center shadow-sm">
+                    <div className="mx-auto mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                        <FaRegFileAlt className="h-5 w-5" />
                     </div>
-                    <p className="text-sm text-slate-600">
-                        Klik tombol <b>&quot;Generate Summary&quot;</b> untuk menganalisis bulan {selectedMonthLabel}.
+                    <h3 className="text-base font-semibold text-amber-800">Empty Data</h3>
+                    <p className="mt-2 text-sm text-slate-600">
+                        Pilih bulan yang ingin dicek, lalu klik <b>&quot;Generate Summary&quot;</b> untuk memulai analisis AI.
                     </p>
                 </div>
             )}
@@ -461,7 +607,7 @@ export default function SummaryPage() {
             {errorModal && (
                 <Modal
                     type="danger"
-                    title="Gagal Memproses"
+                    title="Terjadi Kendala"
                     message={errorModal.message}
                     okText="Tutup"
                     onOk={() => setErrorModal(null)}

@@ -43,7 +43,10 @@ class MonthlySummaryController {
 
     async forecast(req, res, next){
         try {
-            const data = await MonthlySummaryService.getForecast(req.userId);
+            const useAi = String(req.query?.use_ai || '').toLowerCase();
+            const data = await MonthlySummaryService.getForecast(req.userId, {
+                useAi: useAi === '1' || useAi === 'true' || useAi === 'yes',
+            });
             res.status(200).json({success: true, message: "berhasil mengambil forecast bulanan", data})
         } catch (error) {
             next(error)

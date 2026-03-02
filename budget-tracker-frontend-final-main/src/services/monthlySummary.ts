@@ -5,6 +5,8 @@ import { MonthlySummaryForecast, SummaryItem } from "@/interfaces/ISummary";
 import { handleApiError } from "@/utils/handleApiError";
 import getTokenHeader from "@/utils/getTokenHeader";
 
+const AI_REQUEST_TIMEOUT_MS = 120000;
+
 const stripDangerousTags = (value: string): string =>
     value
         .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
@@ -55,6 +57,23 @@ export const normalizeGeneratedSummaryPayload = (rawPayload: unknown): LLMRespon
             ? (rawPayload as Record<string, unknown>)
             : {};
 
+    const source =
+        typeof payload.source === "string" && payload.source.trim().length > 0
+            ? payload.source.trim()
+            : null;
+    const aiSkippedReason =
+        typeof payload.ai_skipped_reason === "string" && payload.ai_skipped_reason.trim().length > 0
+            ? payload.ai_skipped_reason.trim()
+            : typeof payload.aiSkippedReason === "string" && payload.aiSkippedReason.trim().length > 0
+            ? payload.aiSkippedReason.trim()
+            : null;
+    const isAiGenerated =
+        typeof payload.is_ai_generated === "boolean"
+            ? payload.is_ai_generated
+            : typeof payload.isAiGenerated === "boolean"
+            ? payload.isAiGenerated
+            : undefined;
+
     const summary = sanitizeHtmlContent(payload.summary ?? payload.ai_summary, "Tidak ada ringkasan.");
     const recommendations = extractRecommendations(
         payload.recommendations ?? payload.ai_recomendation
@@ -68,6 +87,9 @@ export const normalizeGeneratedSummaryPayload = (rawPayload: unknown): LLMRespon
         summary,
         recommendations,
         trend_analysis: trendAnalysis,
+        source,
+        is_ai_generated: isAiGenerated,
+        ai_skipped_reason: aiSkippedReason,
     };
 }
 
@@ -239,9 +261,13 @@ export const fetchAllMonthlySummaries = async () => {
     }
 }
 
-export const fetchMonthlySummaryForecast = async () => {
+export const fetchMonthlySummaryForecast = async (useAi = false) => {
     try {
         const res = await api.get('/monthly-summary/forecast', {
+            params: {
+                use_ai: useAi ? "1" : "0",
+            },
+            timeout: AI_REQUEST_TIMEOUT_MS,
             headers: getTokenHeader()
         });
         return {
@@ -310,6 +336,7 @@ export const generateMonthlySummary = async (
     try {
         const requestBody = payload ? { ...payload, month } : { month };
         const res = await api.post('/monthly-summary/generate', requestBody, {
+            timeout: 0,
             headers: getTokenHeader()
         });
         return {

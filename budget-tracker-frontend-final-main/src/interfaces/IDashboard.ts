@@ -15,9 +15,19 @@ export interface FinancialOverviewData {
   period_end: string;
   is_fallback?: boolean;
   monthly_income: number;
+  monthly_expense?: number;
+  monthly_debit?: number;
+  monthly_credit?: number;
   monthly_balance: number;
   opening_balance: number;
   closing_balance: number;
+  ledger?: {
+    opening_balance: number;
+    debit: number;
+    credit: number;
+    net_change: number;
+    closing_balance: number;
+  };
   monthly_transaction_count: number;
   income_transaction_count: number;
   expense_transaction_count: number;

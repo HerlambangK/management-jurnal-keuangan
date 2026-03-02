@@ -54,6 +54,64 @@ class TransactionService {
         return { start, end, month };
     }
 
+    toValidDate(value, fieldName = "date") {
+        const parsed = value instanceof Date ? value : new Date(value);
+        if (Number.isNaN(parsed.getTime())) {
+            throw new BadRequestError(`${fieldName} tidak valid`);
+        }
+        return parsed;
+    }
+
+    getEndOfDay(dateValue) {
+        const date = this.toValidDate(dateValue);
+        return new Date(
+            date.getFullYear(),
+            date.getMonth(),
+            date.getDate(),
+            23,
+            59,
+            59,
+            999
+        );
+    }
+
+    async getAccumulatedBalanceUntil(userId, dateValue, options = {}) {
+        const endOfDay = this.getEndOfDay(dateValue);
+        const excludeTransactionId = Number(options?.excludeTransactionId) || null;
+
+        const baseWhere = {
+            user_id: userId,
+            date: {
+                [Op.lte]: endOfDay,
+            },
+        };
+
+        if (excludeTransactionId) {
+            baseWhere.id = {
+                [Op.ne]: excludeTransactionId,
+            };
+        }
+
+        const [incomeRaw, expenseRaw] = await Promise.all([
+            Transaction.sum("amount", {
+                where: {
+                    ...baseWhere,
+                    type: "income",
+                },
+            }),
+            Transaction.sum("amount", {
+                where: {
+                    ...baseWhere,
+                    type: "expense",
+                },
+            }),
+        ]);
+
+        const income = this.toNumber(incomeRaw);
+        const expense = this.toNumber(expenseRaw);
+        return income - expense;
+    }
+
     async resolveActiveMonthRange(userId, monthFilter = null) {
         const normalizedMonth = this.normalizeMonthFilter(monthFilter);
         if (normalizedMonth) {
@@ -180,36 +238,21 @@ class TransactionService {
     }
 
     async create(data) {
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        const txType = data?.type === "income" ? "income" : "expense";
+        const txAmount = this.toNumber(data?.amount);
+        const txDate = this.toValidDate(data?.date);
 
-        const transactions = await Transaction.findAll({
-            where: {
-                user_id: data.user_id,
-                date: {
-                    [Op.between]: [startOfMonth, endOfMonth]
-                }
+        if (txType === "expense") {
+            const accumulatedBalance = await this.getAccumulatedBalanceUntil(
+                data.user_id,
+                txDate
+            );
+
+            if (accumulatedBalance < txAmount) {
+                throw new BadRequestError(
+                    "Saldo akumulasi tidak mencukupi untuk pengeluaran ini"
+                );
             }
-        });
-
-        let totalIncome = 0;
-        let totalExpense = 0;
-
-        for (const tx of transactions){
-            const amount = parseInt(tx.amount);
-
-            if(tx.type === "income") totalIncome += amount;
-            if(tx.type === "expense") totalExpense += amount
-        }
-
-        const amountToAdd = parseInt(data.amount);
-
-        if(
-            data.type === "expense" &&
-            totalIncome < totalExpense + amountToAdd
-        ) {
-            throw new BadRequestError("Income Bulan ini tidak mencukupi");
         }
 
         return await Transaction.create(data);
@@ -218,36 +261,30 @@ class TransactionService {
     async update(id, data) {
         const transaction = await Transaction.findByPk(id);
         if(!transaction) throw new NotFound("Transaksi Tidak ditemukan");
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-        const transactions = await Transaction.findAll({
-            where: {
-                user_id: transaction.user_id,
-                date: {
-                    [Op.between]: [startOfMonth, endOfMonth]
-                }
+        const effectiveType =
+            data?.type === "income" || data?.type === "expense"
+                ? data.type
+                : transaction.type;
+        const effectiveAmount = this.toNumber(
+            data?.amount !== undefined ? data.amount : transaction.amount
+        );
+        const effectiveDate = this.toValidDate(
+            data?.date !== undefined ? data.date : transaction.date
+        );
+
+        if (effectiveType === "expense") {
+            const accumulatedBalance = await this.getAccumulatedBalanceUntil(
+                transaction.user_id,
+                effectiveDate,
+                { excludeTransactionId: transaction.id }
+            );
+
+            if (accumulatedBalance < effectiveAmount) {
+                throw new BadRequestError(
+                    "Saldo akumulasi tidak mencukupi untuk pengeluaran ini"
+                );
             }
-        });
-
-        let totalIncome = 0;
-        let totalExpense = 0;
-
-        for (const tx of transactions){
-            const amount = parseInt(tx.amount);
-
-            if(tx.type === "income") totalIncome += amount;
-            if(tx.type === "expense") totalExpense += amount
-        }
-
-        const amountToAdd = parseInt(data.amount);
-
-        if(
-            data.type === "expense" &&
-            totalIncome < totalExpense + amountToAdd
-        ) {
-            throw new BadRequestError("Income Bulan ini tidak mencukupi");
         }
         return await transaction.update(data);
     }
@@ -391,6 +428,13 @@ class TransactionService {
         const closingBalance = accumulatedIncome - accumulatedExpense;
         const monthlyBalance = monthlyIncome - monthlyExpense;
         const openingBalance = closingBalance - monthlyBalance;
+        const ledger = {
+            opening_balance: openingBalance,
+            debit: monthlyIncome,
+            credit: monthlyExpense,
+            net_change: monthlyBalance,
+            closing_balance: closingBalance,
+        };
 
         const trendStart = new Date(activeRange.start.getFullYear(), activeRange.start.getMonth() - 5, 1, 0, 0, 0, 0);
         const incomeRows = await Transaction.findAll({
@@ -426,9 +470,13 @@ class TransactionService {
             period_end: activeRange.end,
             is_fallback: activeRange.is_fallback,
             monthly_income: monthlyIncome,
+            monthly_expense: monthlyExpense,
+            monthly_debit: monthlyIncome,
+            monthly_credit: monthlyExpense,
             monthly_balance: monthlyBalance,
             opening_balance: openingBalance,
             closing_balance: closingBalance,
+            ledger,
             monthly_transaction_count: monthlyTransactions.length,
             income_transaction_count: incomeTransactionCount,
             expense_transaction_count: expenseTransactionCount,
