@@ -10,8 +10,8 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
-	title: 'Budget Tracker',
-	description: 'Budget Tracker',
+	title: 'Budget Tracker App',
+	description: 'Track your budget with ease',
 };
 
 export default function RootLayout({
@@ -21,7 +21,9 @@ export default function RootLayout({
 }>) {
 	return (
 		<html lang='en'>
-			<body className={`${poppins.variable} overflow-x-hidden bg-gray-100 antialiased`}>
+			<body
+				className={`${poppins.variable} overflow-x-hidden bg-gray-100 antialiased`}
+			>
 				{children}
 				<NetworkStatusBanner />
 			</body>
