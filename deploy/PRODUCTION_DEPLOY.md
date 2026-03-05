@@ -36,6 +36,7 @@ Isi minimal:
 
 ```env
 DOMAIN=financial.seribuweb.site
+VPS_IP=31.97.222.155
 BACKEND_PORT=5001
 LETSENCRYPT_EMAIL=admin@financial.seribuweb.site
 
@@ -43,6 +44,14 @@ MYSQL_ROOT_PASSWORD=<password-root-mysql-kuat>
 MYSQL_DATABASE=budget_tracker_prod
 MYSQL_USER=budget_app
 MYSQL_PASSWORD=<password-app-db-kuat>
+MYSQL_BIND_ADDRESS=127.0.0.1
+MYSQL_EXTERNAL_PORT=3306
+BACKUP_BEFORE_DEPLOY=true
+DB_BACKUP_DIR=./backups/mysql
+DB_BACKUP_RETENTION_DAYS=14
+APP_HEALTHCHECK_URL=https://financial.seribuweb.site
+API_HEALTHCHECK_URL=https://financial.seribuweb.site/api/v1/health
+API_HEALTHCHECK_PATH=/api/v1/health
 ```
 
 ## 4) Isi file backend `.env` (WAJIB)
@@ -111,12 +120,14 @@ bash ./deploy/server-deploy.sh
 ```
 
 Script deploy akan:
-1. start/update MySQL
-2. pastikan database `${MYSQL_DATABASE}` tersedia
-3. jalankan migrasi
-4. jalankan seeder
-5. build+redeploy backend/frontend/nginx
-6. validasi dan reload nginx
+1. backup DB sebelum deploy
+2. start/update MySQL
+3. pastikan database `${MYSQL_DATABASE}` tersedia
+4. jalankan migrasi
+5. jalankan seeder
+6. build+redeploy backend/frontend/nginx
+7. validasi dan reload nginx
+8. jalankan healthcheck aplikasi
 
 ## 8) Verifikasi wajib
 
@@ -134,6 +145,16 @@ docker compose --profile tools run --rm migrator npm run migrate:status
 docker compose --profile tools run --rm seeder npm run seed
 ```
 
+Backup/restore manual:
+
+```bash
+# backup sekarang
+bash ./deploy/db-backup.sh
+
+# restore dari file backup (replace database)
+bash ./deploy/db-restore.sh --file ./backups/mysql/<nama-file>.sql.gz --replace-database
+```
+
 Verifikasi sertifikat:
 
 ```bash
@@ -141,7 +162,30 @@ openssl s_client -connect financial.seribuweb.site:443 -servername financial.ser
   | openssl x509 -noout -subject -issuer -dates
 ```
 
-## 9) SSH hardening (opsional tapi direkomendasikan)
+## 9) Akses DB via DBeaver (aman)
+
+Disarankan pakai SSH tunnel (jangan expose DB ke internet).
+
+Setting DBeaver:
+- Connection: MySQL
+- Host: `127.0.0.1`
+- Port: `3306` (atau `MYSQL_EXTERNAL_PORT`)
+- Database: `${MYSQL_DATABASE}`
+- Username: `${MYSQL_USER}` (atau `root`)
+- Password: `${MYSQL_PASSWORD}` (atau `${MYSQL_ROOT_PASSWORD}`)
+
+Tab SSH di DBeaver:
+- Use SSH Tunnel: ON
+- SSH Host: IP VPS
+- SSH Port: `22`
+- SSH User: user SSH VPS (`root`/deploy user)
+- Auth: Private Key (key SSH kamu)
+
+Catatan:
+- Dengan `MYSQL_BIND_ADDRESS=127.0.0.1`, port MySQL hanya terbuka di localhost server.
+- Jika ingin direct access tanpa SSH tunnel, baru set `MYSQL_BIND_ADDRESS=0.0.0.0` + batasi firewall ke IP kantor/laptop saja.
+
+## 10) SSH hardening (opsional tapi direkomendasikan)
 Jika siap menggunakan login SSH key-only:
 
 ```bash
@@ -153,7 +197,7 @@ Catatan:
 - Pastikan key SSH sudah terpasang sebelum aktifkan.
 - Jika ganti port SSH, buka juga port tersebut di UFW.
 
-## 10) Troubleshooting cepat
+## 11) Troubleshooting cepat
 
 ### Backend error `EAI_AGAIN mysql`
 Artinya backend belum resolve DNS service `mysql`.

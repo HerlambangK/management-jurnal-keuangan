@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 DOMAIN="${DOMAIN:-financial.seribuweb.site}"
-VPS_IP="${VPS_IP:-194.238.16.13}"
+VPS_IP="${VPS_IP:-31.97.222.155}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-admin@${DOMAIN}}"
 APP_DIR="${APP_DIR:-/opt/financial-app}"
 
@@ -56,12 +56,16 @@ ensure_root_env() {
     else
       cat > "${ROOT_ENV_FILE}" <<EOF
 DOMAIN=${DOMAIN}
+VPS_IP=${VPS_IP}
 BACKEND_PORT=5001
 LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}
 MYSQL_ROOT_PASSWORD=replace_with_strong_root_password
 MYSQL_DATABASE=budget_tracker_prod
 MYSQL_USER=budget_app
 MYSQL_PASSWORD=replace_with_strong_app_password
+APP_HEALTHCHECK_URL=https://${DOMAIN}
+API_HEALTHCHECK_URL=https://${DOMAIN}/api/v1/health
+API_HEALTHCHECK_PATH=/api/v1/health
 EOF
     fi
   fi
@@ -72,12 +76,21 @@ EOF
   set +a
 
   DOMAIN="${DOMAIN:-financial.seribuweb.site}"
+  VPS_IP="${VPS_IP:-31.97.222.155}"
   LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-admin@${DOMAIN}}"
   BACKEND_PORT="${BACKEND_PORT:-5001}"
   MYSQL_DATABASE="${MYSQL_DATABASE:-budget_tracker_prod}"
   MYSQL_USER="${MYSQL_USER:-budget_app}"
   MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-}"
   MYSQL_PASSWORD="${MYSQL_PASSWORD:-}"
+  MYSQL_BIND_ADDRESS="${MYSQL_BIND_ADDRESS:-127.0.0.1}"
+  MYSQL_EXTERNAL_PORT="${MYSQL_EXTERNAL_PORT:-3306}"
+  BACKUP_BEFORE_DEPLOY="${BACKUP_BEFORE_DEPLOY:-true}"
+  DB_BACKUP_DIR="${DB_BACKUP_DIR:-./backups/mysql}"
+  DB_BACKUP_RETENTION_DAYS="${DB_BACKUP_RETENTION_DAYS:-14}"
+  APP_HEALTHCHECK_URL="${APP_HEALTHCHECK_URL:-https://${DOMAIN}}"
+  API_HEALTHCHECK_URL="${API_HEALTHCHECK_URL:-https://${DOMAIN}/api/v1/health}"
+  API_HEALTHCHECK_PATH="${API_HEALTHCHECK_PATH:-/api/v1/health}"
 
   if [[ -z "${MYSQL_ROOT_PASSWORD}" || "${MYSQL_ROOT_PASSWORD}" == "replace_with_strong_root_password" ]]; then
     echo "MYSQL_ROOT_PASSWORD belum diisi valid pada ${ROOT_ENV_FILE}"
@@ -90,10 +103,19 @@ EOF
   fi
 
   upsert_env "DOMAIN" "${DOMAIN}" "${ROOT_ENV_FILE}"
+  upsert_env "VPS_IP" "${VPS_IP}" "${ROOT_ENV_FILE}"
   upsert_env "BACKEND_PORT" "${BACKEND_PORT}" "${ROOT_ENV_FILE}"
   upsert_env "LETSENCRYPT_EMAIL" "${LETSENCRYPT_EMAIL}" "${ROOT_ENV_FILE}"
   upsert_env "MYSQL_DATABASE" "${MYSQL_DATABASE}" "${ROOT_ENV_FILE}"
   upsert_env "MYSQL_USER" "${MYSQL_USER}" "${ROOT_ENV_FILE}"
+  upsert_env "MYSQL_BIND_ADDRESS" "${MYSQL_BIND_ADDRESS}" "${ROOT_ENV_FILE}"
+  upsert_env "MYSQL_EXTERNAL_PORT" "${MYSQL_EXTERNAL_PORT}" "${ROOT_ENV_FILE}"
+  upsert_env "BACKUP_BEFORE_DEPLOY" "${BACKUP_BEFORE_DEPLOY}" "${ROOT_ENV_FILE}"
+  upsert_env "DB_BACKUP_DIR" "${DB_BACKUP_DIR}" "${ROOT_ENV_FILE}"
+  upsert_env "DB_BACKUP_RETENTION_DAYS" "${DB_BACKUP_RETENTION_DAYS}" "${ROOT_ENV_FILE}"
+  upsert_env "APP_HEALTHCHECK_URL" "${APP_HEALTHCHECK_URL}" "${ROOT_ENV_FILE}"
+  upsert_env "API_HEALTHCHECK_URL" "${API_HEALTHCHECK_URL}" "${ROOT_ENV_FILE}"
+  upsert_env "API_HEALTHCHECK_PATH" "${API_HEALTHCHECK_PATH}" "${ROOT_ENV_FILE}"
 }
 
 ensure_backend_env() {
@@ -322,6 +344,7 @@ echo "[6/12] Siapkan .env root / backend / frontend"
 ensure_root_env
 ensure_backend_env
 ensure_frontend_env
+chmod +x "${APP_DIR}/deploy/server-deploy.sh" "${APP_DIR}/deploy/db-backup.sh" "${APP_DIR}/deploy/db-restore.sh"
 
 mkdir -p "${NGINX_CONF_DIR}" "${CERTBOT_WWW_DIR}" "${CERTBOT_CONF_DIR}"
 
@@ -381,6 +404,19 @@ cat > /etc/cron.d/financial-certbot-renew <<'EOF'
 17 3 * * * root /usr/local/bin/financial-certbot-renew.sh
 EOF
 chmod 644 /etc/cron.d/financial-certbot-renew
+
+cat > /usr/local/bin/financial-db-backup.sh <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+cd "${APP_DIR}"
+bash ./deploy/db-backup.sh "scheduled-\$(date +%Y%m%d-%H%M%S)"
+EOF
+chmod +x /usr/local/bin/financial-db-backup.sh
+
+cat > /etc/cron.d/financial-db-backup <<'EOF'
+23 2 * * * root /usr/local/bin/financial-db-backup.sh >> /var/log/financial-db-backup.log 2>&1
+EOF
+chmod 644 /etc/cron.d/financial-db-backup
 
 echo
 echo "Selesai. Jalankan verifikasi:"

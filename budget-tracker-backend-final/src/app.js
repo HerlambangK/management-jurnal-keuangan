@@ -4,7 +4,7 @@ const app = express();
 const { enableCORS, setSecurityHeaders } = require('./middlewares/security.middleware');
 const errorHandler = require('./middlewares/errorHandler.middleware');
 const routes = require('./routes');
-require('./store/sequelize');
+const sequelize = require('./store/sequelize');
 
 app.set('trust proxy', true);
 app.use(express.json({ limit: '5mb' }));
@@ -13,6 +13,24 @@ app.use(enableCORS);
 app.use(setSecurityHeaders);
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use('/api/v1/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
+app.get('/api/v1/health', async (req, res) => {
+  try {
+    await sequelize.authenticate();
+    return res.status(200).json({
+      success: true,
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    return res.status(503).json({
+      success: false,
+      status: 'degraded',
+      message: 'Database connection unavailable',
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
 
 app.use('/api/v1', routes);
 app.use(errorHandler);

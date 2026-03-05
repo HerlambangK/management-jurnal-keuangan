@@ -3,7 +3,7 @@
 Target:
 - Repo: `https://github.com/HerlambangK/management-jurnal-keuangan.git`
 - Domain: `financial.seribuweb.site`
-- VPS IP: `194.238.16.13`
+- VPS IP: `31.97.222.155`
 - Branch deploy: `main`
 
 Panduan ini untuk Ubuntu VPS dengan Docker Compose.
@@ -14,7 +14,7 @@ Panduan ini untuk Ubuntu VPS dengan Docker Compose.
 2. Buka menu `DNS Zone Editor`.
 3. Set `A record`:
    - Host/Name: `financial`
-   - Points to: `194.238.16.13`
+   - Points to: `31.97.222.155`
    - TTL: default (misal 300)
 4. Hapus record `A`/`CNAME` lain yang bentrok untuk subdomain `financial`.
 5. Tunggu propagasi DNS (biasanya 1-15 menit, bisa lebih lama).
@@ -25,14 +25,14 @@ Validasi dari laptop:
 dig +short financial.seribuweb.site
 ```
 
-Output harus berisi `194.238.16.13`.
+Output harus berisi `31.97.222.155`.
 
 ## 2) Login VPS dan siapkan folder project
 
 SSH ke VPS:
 
 ```bash
-ssh root@194.238.16.13
+ssh root@31.97.222.155
 ```
 
 Jika tidak pakai `root`, ganti user sesuai akun VPS.
@@ -73,6 +73,8 @@ MYSQL_ROOT_PASSWORD=<password-root-kuat>
 MYSQL_DATABASE=budget_tracker_prod
 MYSQL_USER=budget_app
 MYSQL_PASSWORD=<password-app-kuat>
+MYSQL_BIND_ADDRESS=127.0.0.1
+MYSQL_EXTERNAL_PORT=3306
 ```
 
 Edit backend `.env` minimal:
@@ -150,13 +152,13 @@ ssh-keygen -t ed25519 -C "gha-financial-deploy" -f ~/.ssh/gha_financial_deploy
 Copy public key ke VPS:
 
 ```bash
-ssh-copy-id -i ~/.ssh/gha_financial_deploy.pub root@194.238.16.13
+ssh-copy-id -i ~/.ssh/gha_financial_deploy.pub root@31.97.222.155
 ```
 
 Test login key:
 
 ```bash
-ssh -i ~/.ssh/gha_financial_deploy root@194.238.16.13
+ssh -i ~/.ssh/gha_financial_deploy root@31.97.222.155
 ```
 
 ## 7) Isi GitHub Actions Secrets
@@ -165,12 +167,14 @@ Masuk ke repo GitHub:
 - `Settings` -> `Secrets and variables` -> `Actions` -> `New repository secret`
 
 Isi secret berikut:
-- `VPS_HOST` = `194.238.16.13`
+- `VPS_HOST` = `31.97.222.155`
 - `VPS_USER` = `root` (atau user deploy kamu)
 - `VPS_PORT` = `22`
 - `VPS_SSH_KEY` = isi file private key `~/.ssh/gha_financial_deploy` (full termasuk `BEGIN`/`END`)
 - `VPS_APP_DIR` = `/opt/financial-app`
 - `VPS_REPO_URL` = `https://github.com/HerlambangK/management-jurnal-keuangan.git`
+- `TELEGRAM_BOT_TOKEN` = token bot Telegram (opsional)
+- `TELEGRAM_CHAT_ID` = chat id Telegram tujuan (opsional)
 
 ## 8) CI/CD yang sudah disiapkan di repo
 
@@ -179,8 +183,10 @@ Workflow: `.github/workflows/ci-cd.yml`
 Alur:
 1. Saat `pull_request` dan `push` ke `main`: jalankan CI build frontend + syntax check backend.
 2. Saat `push` ke `main`: deploy ke VPS via SSH.
-3. Jika folder app belum ada di VPS, workflow otomatis `git clone`.
-4. Workflow menjalankan `bash ./deploy/server-deploy.sh`.
+3. Workflow kirim notifikasi Telegram `DEPLOY STARTED` (jika secret Telegram diisi).
+4. Jika folder app belum ada di VPS, workflow otomatis `git clone`.
+5. Workflow menjalankan `bash ./deploy/server-deploy.sh` (sudah termasuk backup DB sebelum deploy).
+6. Workflow kirim notifikasi Telegram `DEPLOY SUCCESS` / `DEPLOY FAILED`.
 
 ## 9) Trigger deploy otomatis
 
@@ -218,4 +224,26 @@ cd /opt/financial-app
 git log --oneline -n 5
 git checkout <commit-sebelumnya>
 bash ./deploy/server-deploy.sh
+```
+
+Backup/restore database:
+
+```bash
+cd /opt/financial-app
+bash ./deploy/db-backup.sh
+bash ./deploy/db-restore.sh --file ./backups/mysql/<backup-file>.sql.gz --replace-database
+```
+
+Akses DBeaver (via SSH tunnel):
+
+```text
+MySQL Host: 127.0.0.1
+MySQL Port: 3306
+Database: budget_tracker_prod
+Username: budget_app
+Password: <password-app-kuat>
+SSH Host: <IP VPS>
+SSH Port: 22
+SSH User: root/deploy user
+SSH Auth: private key
 ```

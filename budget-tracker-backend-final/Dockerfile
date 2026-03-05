@@ -9,6 +9,7 @@ ENV NODE_ENV=production
 RUN addgroup -S nodejs && adduser -S nodeapp -G nodejs
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+RUN mkdir -p /app/uploads/avatars && chown -R nodeapp:nodejs /app
 USER nodeapp
 EXPOSE 5001
 CMD ["node", "src/server.js"]
