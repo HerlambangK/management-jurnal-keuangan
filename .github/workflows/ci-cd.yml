@@ -58,11 +58,15 @@ jobs:
 
     steps:
       - name: Notify Telegram (deploy started)
-        if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
+          if [ -z "${TELEGRAM_BOT_TOKEN}" ] || [ -z "${TELEGRAM_CHAT_ID}" ]; then
+            echo "Telegram secrets not set, skipping notification."
+            exit 0
+          fi
+
           MESSAGE=$(cat <<EOF
           DEPLOY STARTED
           Repo: ${GITHUB_REPOSITORY}
@@ -76,6 +80,31 @@ jobs:
           curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${MESSAGE}"
+
+      - name: Validate deploy secrets
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          missing=0
+
+          if [ -z "${VPS_HOST}" ]; then
+            echo "::error::Missing required secret VPS_HOST"
+            missing=1
+          fi
+          if [ -z "${VPS_USER}" ]; then
+            echo "::error::Missing required secret VPS_USER"
+            missing=1
+          fi
+          if [ -z "${VPS_SSH_KEY}" ]; then
+            echo "::error::Missing required secret VPS_SSH_KEY"
+            missing=1
+          fi
+
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
 
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -113,11 +142,16 @@ jobs:
             bash ./deploy/server-deploy.sh
 
       - name: Notify Telegram (deploy success)
-        if: ${{ success() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        if: ${{ success() }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
+          if [ -z "${TELEGRAM_BOT_TOKEN}" ] || [ -z "${TELEGRAM_CHAT_ID}" ]; then
+            echo "Telegram secrets not set, skipping notification."
+            exit 0
+          fi
+
           MESSAGE=$(cat <<EOF
           DEPLOY SUCCESS
           Repo: ${GITHUB_REPOSITORY}
@@ -132,11 +166,16 @@ jobs:
             --data-urlencode "text=${MESSAGE}"
 
       - name: Notify Telegram (deploy failed)
-        if: ${{ failure() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        if: ${{ failure() }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
+          if [ -z "${TELEGRAM_BOT_TOKEN}" ] || [ -z "${TELEGRAM_CHAT_ID}" ]; then
+            echo "Telegram secrets not set, skipping notification."
+            exit 0
+          fi
+
           MESSAGE=$(cat <<EOF
           DEPLOY FAILED
           Repo: ${GITHUB_REPOSITORY}
