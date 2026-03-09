@@ -83,20 +83,13 @@ jobs:
 
       - name: Validate deploy secrets
         env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_HOST: ${{ secrets.VPS_HOST || vars.VPS_HOST || '31.97.222.155' }}
+          VPS_USER: ${{ secrets.VPS_USER || vars.VPS_USER || 'root' }}
+          VPS_PORT: ${{ secrets.VPS_PORT || vars.VPS_PORT || '2221' }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           missing=0
 
-          if [ -z "${VPS_HOST}" ]; then
-            echo "::error::Missing required secret VPS_HOST"
-            missing=1
-          fi
-          if [ -z "${VPS_USER}" ]; then
-            echo "::error::Missing required secret VPS_USER"
-            missing=1
-          fi
           if [ -z "${VPS_SSH_KEY}" ]; then
             echo "::error::Missing required secret VPS_SSH_KEY"
             missing=1
@@ -109,25 +102,18 @@ jobs:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
+          host: ${{ secrets.VPS_HOST || vars.VPS_HOST || '31.97.222.155' }}
+          username: ${{ secrets.VPS_USER || vars.VPS_USER || 'root' }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT || 22 }}
+          port: ${{ secrets.VPS_PORT || vars.VPS_PORT || 2221 }}
           script_stop: true
           timeout: 60s
           command_timeout: 30m
           script: |
             set -Eeuo pipefail
 
-            APP_DIR="${{ secrets.VPS_APP_DIR }}"
-            if [ -z "${APP_DIR}" ]; then
-              APP_DIR="/opt/financial-app"
-            fi
-
-            REPO_URL="${{ secrets.VPS_REPO_URL }}"
-            if [ -z "${REPO_URL}" ]; then
-              REPO_URL="https://github.com/HerlambangK/management-jurnal-keuangan.git"
-            fi
+            APP_DIR="${{ secrets.VPS_APP_DIR || vars.VPS_APP_DIR || '/opt/financial-app' }}"
+            REPO_URL="${{ secrets.VPS_REPO_URL || vars.VPS_REPO_URL || 'https://github.com/HerlambangK/management-jurnal-keuangan.git' }}"
 
             if [ ! -d "${APP_DIR}/.git" ]; then
               mkdir -p "$(dirname "${APP_DIR}")"
