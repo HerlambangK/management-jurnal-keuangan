@@ -64,6 +64,17 @@ const formatSessionTime = (value: string): string => {
   });
 };
 
+const formatSessionLocation = (session: LoginSessionItem): string => {
+  const location = String(session.location || "").trim();
+  if (location) return location;
+
+  const ip = String(session.ip_address || "").trim();
+  if (!ip || ip === "unknown") {
+    return "Tidak diketahui (IP publik tidak tersedia)";
+  }
+  return `Tidak diketahui (berdasarkan IP ${ip})`;
+};
+
 const toFriendlyError = (error: ApiServiceError): string => {
   if (error.isNetworkError) {
     return "Koneksi internet terputus. Coba lagi saat jaringan stabil.";
@@ -188,7 +199,7 @@ export default function ProfilePage() {
       }
 
       try {
-        const sessionRes = await fetchLoginSessions(15);
+        const sessionRes = await fetchLoginSessions(3);
         const latestSessions = Array.isArray(sessionRes?.data)
           ? sessionRes.data
           : profileData?.sessions || [];
@@ -562,22 +573,50 @@ export default function ProfilePage() {
             ) : (
               <div className="mt-3 space-y-3">
                 {sessions.map((session) => (
-                  <div key={session.id} className="rounded-xl border border-slate-200 p-3">
+                  <div
+                    key={session.id}
+                    className={`rounded-xl border p-3 ${
+                      session.is_current
+                        ? "border-indigo-300 bg-indigo-50/50"
+                        : "border-slate-200"
+                    }`}
+                  >
                     <div className="flex items-start justify-between gap-3">
-                      <p className="text-sm font-semibold text-slate-800">
-                        {session.device || "Perangkat tidak diketahui"}
-                      </p>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">
+                          {session.device || "Perangkat tidak diketahui"}
+                        </p>
+                        {session.is_current && (
+                          <p className="mt-1 inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
+                            Session Sekarang
+                          </p>
+                        )}
+                      </div>
                       <button
                         type="button"
                         onClick={() => void handleDeleteSession(session.id)}
-                        disabled={deletingSessionId === session.id || isClearingSessions}
-                        className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={
+                          deletingSessionId === session.id ||
+                          isClearingSessions ||
+                          Boolean(session.is_current)
+                        }
+                        className={`rounded-md border px-2 py-1 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                          session.is_current
+                            ? "border-slate-300 bg-slate-100 text-slate-500"
+                            : "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                        }`}
                       >
-                        {deletingSessionId === session.id ? "..." : "Hapus"}
+                        {deletingSessionId === session.id
+                          ? "..."
+                          : session.is_current
+                            ? "Sedang Dipakai"
+                            : "Hapus"}
                       </button>
                     </div>
                     <p className="mt-1 text-xs text-slate-600">IP: {session.ip_address || "-"}</p>
-                    <p className="text-xs text-slate-600">Lokasi: {session.location || "-"}</p>
+                    <p className="text-xs text-slate-600">
+                      Lokasi: {formatSessionLocation(session)}
+                    </p>
                     <p className="text-xs text-slate-500">{formatSessionTime(session.logged_in_at)}</p>
                   </div>
                 ))}

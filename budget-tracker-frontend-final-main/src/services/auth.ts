@@ -63,7 +63,7 @@ export const updateProfile = async (payload: UpdateProfilePayload): Promise<Prof
     }
 };
 
-export const fetchLoginSessions = async (limit = 15): Promise<SessionListResponse> => {
+export const fetchLoginSessions = async (limit = 3): Promise<SessionListResponse> => {
     try {
         const response = await api.get("/auth/sessions", {
             headers: getTokenHeader(),

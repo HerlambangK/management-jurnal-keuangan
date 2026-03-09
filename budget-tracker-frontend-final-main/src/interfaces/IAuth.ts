@@ -26,6 +26,7 @@ export interface LoginSessionItem {
   location: string;
   user_agent?: string;
   logged_in_at: string;
+  is_current?: boolean;
 }
 
 export interface SessionDeleteData {

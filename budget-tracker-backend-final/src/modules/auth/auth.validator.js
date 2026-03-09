@@ -57,8 +57,8 @@ const updateProfileValidator = [
 const sessionsQueryValidator = [
   query('limit')
     .optional()
-    .isInt({ min: 1, max: 50 })
-    .withMessage('Limit minimal 1 dan maksimal 50'),
+    .isInt({ min: 1, max: 3 })
+    .withMessage('Limit minimal 1 dan maksimal 3'),
 ];
 
 const sessionIdParamValidator = [

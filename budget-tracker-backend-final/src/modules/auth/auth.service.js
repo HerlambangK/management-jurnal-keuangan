@@ -13,6 +13,7 @@ class AuthService {
     constructor() {
         this.SALT_ROUNDS = 10;
         this.MAX_AVATAR_SIZE_BYTES = 2 * 1024 * 1024;
+        this.MAX_LOGIN_HISTORY = 3;
     }
 
     sanitizeUser(user) {
@@ -30,8 +31,12 @@ class AuthService {
 
         const hash = await bcrypt.hash(password, this.SALT_ROUNDS);
         const newUser = await User.create({name, email, password: hash, number});
-        const token = JwtService.sign({ id: newUser.id, email: newUser.email });
-        await this.trackLoginSession(newUser.id, context.req);
+        const sessionId = await this.trackLoginSession(newUser.id, context.req);
+        const tokenPayload = { id: newUser.id, email: newUser.email };
+        if (Number.isInteger(Number(sessionId)) && Number(sessionId) > 0) {
+            tokenPayload.sid = Number(sessionId);
+        }
+        const token = JwtService.sign(tokenPayload);
 
         return { user: this.sanitizeUser(newUser), token }
     }
@@ -43,13 +48,17 @@ class AuthService {
         const isValid = await bcrypt.compare(password, user.password);
         if(!isValid) throw new BadRequestError("Password nya salah boy");
 
-        const token = JwtService.sign({ id: user.id, email: user.email });
-        await this.trackLoginSession(user.id, context.req);
+        const sessionId = await this.trackLoginSession(user.id, context.req);
+        const tokenPayload = { id: user.id, email: user.email };
+        if (Number.isInteger(Number(sessionId)) && Number(sessionId) > 0) {
+            tokenPayload.sid = Number(sessionId);
+        }
+        const token = JwtService.sign(tokenPayload);
 
         return { user: this.sanitizeUser(user), token }
     }
 
-    async profile(userId){
+    async profile(userId, context = {}){
         const user = await User.findByPk(userId, {
             attributes: { exclude: ['password'] },
         });
@@ -57,14 +66,18 @@ class AuthService {
             throw new NotFound('User tidak ditemukan');
         }
 
-        const sessions = await this.getLoginSessions(userId, 10);
+        const sessions = await this.getLoginSessions(
+            userId,
+            this.MAX_LOGIN_HISTORY,
+            context
+        );
         return {
             ...this.sanitizeUser(user),
             sessions,
         };
     }
 
-    async updateProfile(userId, payload = {}) {
+    async updateProfile(userId, payload = {}, context = {}) {
         const user = await User.findByPk(userId);
         if (!user) {
             throw new NotFound('User tidak ditemukan');
@@ -122,14 +135,27 @@ class AuthService {
             await user.update(updates);
         }
 
-        return await this.profile(userId);
+        return await this.profile(userId, context);
     }
 
-    async sessions(userId, limit = 15) {
-        return await this.getLoginSessions(userId, limit);
+    async sessions(userId, limit = this.MAX_LOGIN_HISTORY, context = {}) {
+        return await this.getLoginSessions(userId, limit, context);
     }
 
-    async deleteSession(userId, sessionId) {
+    async deleteSession(userId, sessionId, context = {}) {
+        const currentSessionIdRaw =
+            context?.currentSessionId ?? context?.auth?.sid;
+        const currentSessionId = Number(currentSessionIdRaw);
+        if (
+            Number.isInteger(currentSessionId) &&
+            currentSessionId > 0 &&
+            currentSessionId === Number(sessionId)
+        ) {
+            throw new BadRequestError(
+                'Sesi yang sedang dipakai tidak bisa dihapus. Hapus sesi lain atau klik hapus semua.'
+            );
+        }
+
         const totalSessions = await LoginSession.count({
             where: {
                 user_id: userId,
@@ -166,10 +192,13 @@ class AuthService {
         return { deleted, require_relogin: true };
     }
 
-    async getLoginSessions(userId, limit = 15) {
-        const safeLimit = Math.min(Math.max(Number(limit) || 15, 1), 50);
+    async getLoginSessions(userId, limit = this.MAX_LOGIN_HISTORY, context = {}) {
+        const safeLimit = Math.min(
+            Math.max(Number(limit) || this.MAX_LOGIN_HISTORY, 1),
+            this.MAX_LOGIN_HISTORY
+        );
         try {
-            return await LoginSession.findAll({
+            const rawSessions = await LoginSession.findAll({
                 where: {
                     user_id: userId,
                 },
@@ -184,12 +213,87 @@ class AuthService {
                 order: [['logged_in_at', 'DESC']],
                 limit: safeLimit,
             });
+
+            const normalizedSessions = rawSessions.map((session) => {
+                const base = session?.toJSON ? session.toJSON() : { ...(session || {}) };
+                return {
+                    ...base,
+                    location: this.formatLocationLabel(base.location, base.ip_address),
+                };
+            });
+            const currentSessionIndex = this.resolveCurrentSessionIndex(
+                normalizedSessions,
+                context
+            );
+
+            return normalizedSessions.map((session, index) => ({
+                ...session,
+                is_current: index === currentSessionIndex,
+            }));
         } catch (error) {
             if (process.env.NODE_ENV !== 'production') {
                 console.error('[Auth] failed to get login sessions', error?.message || error);
             }
             return [];
         }
+    }
+
+    formatLocationLabel(location, ipAddress) {
+        const rawLocation = String(location || '').trim();
+        const ip = String(ipAddress || '').trim();
+        if (!rawLocation || /^tidak diketahui$/i.test(rawLocation)) {
+            return ip && ip !== 'unknown'
+                ? `Tidak diketahui (berdasarkan IP ${ip})`
+                : 'Tidak diketahui (IP publik tidak tersedia)';
+        }
+
+        if (/^local network$/i.test(rawLocation)) {
+            return ip && ip !== 'unknown'
+                ? `Jaringan Lokal (IP privat ${ip})`
+                : 'Jaringan Lokal (IP privat/localhost)';
+        }
+
+        return /(berdasarkan IP)/i.test(rawLocation)
+            ? rawLocation
+            : `${rawLocation} (berdasarkan IP)`;
+    }
+
+    resolveCurrentSessionIndex(sessions = [], context = {}) {
+        if (!Array.isArray(sessions) || sessions.length === 0) {
+            return -1;
+        }
+
+        const currentSessionIdRaw =
+            context?.currentSessionId ?? context?.auth?.sid;
+        const currentSessionId = Number(currentSessionIdRaw);
+        if (Number.isInteger(currentSessionId) && currentSessionId > 0) {
+            const bySessionId = sessions.findIndex(
+                (session) => Number(session?.id) === currentSessionId
+            );
+            if (bySessionId >= 0) {
+                return bySessionId;
+            }
+        }
+
+        const req = context?.req;
+        if (!req) {
+            return -1;
+        }
+
+        const currentIp = this.extractClientIp(req);
+        const currentUserAgent = String(req?.headers?.['user-agent'] || '').trim();
+        if (!currentIp && !currentUserAgent) {
+            return -1;
+        }
+
+        return sessions.findIndex((session) => {
+            const sameIp =
+                currentIp && String(session?.ip_address || '') === currentIp;
+            const sameUserAgent =
+                currentUserAgent &&
+                String(session?.user_agent || '').trim() === currentUserAgent;
+            return sameIp && sameUserAgent;
+        });
     }
 
     extractClientIp(req) {
@@ -264,7 +368,7 @@ class AuthService {
     }
 
     async trackLoginSession(userId, req) {
-        if (!req || !userId) return;
+        if (!req || !userId) return null;
 
         try {
             const ipAddress = this.extractClientIp(req);
@@ -272,7 +376,7 @@ class AuthService {
             const device = this.extractDeviceInfo(userAgent);
             const location = await this.resolveLocationFromIp(ipAddress);
 
-            await LoginSession.create({
+            const loginSession = await LoginSession.create({
                 user_id: userId,
                 ip_address: ipAddress,
                 device,
@@ -280,11 +384,39 @@ class AuthService {
                 user_agent: userAgent,
                 logged_in_at: new Date(),
             });
+
+            await this.pruneLoginSessions(userId);
+            return loginSession?.id || null;
         } catch (error) {
             if (process.env.NODE_ENV !== 'production') {
                 console.error('[Auth] failed to track login session', error?.message || error);
             }
+            return null;
         }
+    }
+
+    async pruneLoginSessions(userId) {
+        const staleSessions = await LoginSession.findAll({
+            where: { user_id: userId },
+            attributes: ['id'],
+            order: [
+                ['logged_in_at', 'DESC'],
+                ['id', 'DESC'],
+            ],
+            offset: this.MAX_LOGIN_HISTORY,
+        });
+
+        if (staleSessions.length === 0) {
+            return;
+        }
+
+        const staleIds = staleSessions.map((session) => session.id);
+        await LoginSession.destroy({
+            where: {
+                id: staleIds,
+                user_id: userId,
+            },
+        });
     }
 
     getUploadsBaseUrl() {

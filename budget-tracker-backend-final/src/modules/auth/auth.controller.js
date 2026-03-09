@@ -32,7 +32,10 @@ class AuthController {
     async profile(req, res, next) {
         try {
             const userId = req.userId;
-            const user = await AuthService.profile(userId);
+            const user = await AuthService.profile(userId, {
+                req,
+                auth: req.user,
+            });
 
             res.status(200).json({
                 success: true,
@@ -47,7 +50,10 @@ class AuthController {
     async updateProfile(req, res, next) {
         try {
             const userId = req.userId;
-            const result = await AuthService.updateProfile(userId, req.body || {});
+            const result = await AuthService.updateProfile(userId, req.body || {}, {
+                req,
+                auth: req.user,
+            });
 
             res.status(200).json({
                 success: true,
@@ -62,8 +68,11 @@ class AuthController {
     async sessions(req, res, next) {
         try {
             const userId = req.userId;
-            const limit = Number(req.query.limit) || 15;
-            const result = await AuthService.sessions(userId, limit);
+            const limit = Number(req.query.limit) || 3;
+            const result = await AuthService.sessions(userId, limit, {
+                req,
+                auth: req.user,
+            });
 
             res.status(200).json({
                 success: true,
@@ -79,7 +88,10 @@ class AuthController {
         try {
             const userId = req.userId;
             const sessionId = Number(req.params.sessionId);
-            const result = await AuthService.deleteSession(userId, sessionId);
+            const result = await AuthService.deleteSession(userId, sessionId, {
+                req,
+                auth: req.user,
+            });
 
             res.status(200).json({
                 success: true,

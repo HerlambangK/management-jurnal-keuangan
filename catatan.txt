@@ -1,0 +1,32 @@
+Diagnosis tepatnya sudah ketemu: server menerima key, tapi minta auth publickey lagi. Itu tanda AuthenticationMethods di SSH server kamu kemungkinan diset ke mode 2 key (publickey,publickey) atau ada rule Match yang bentrok.
+
+Jalankan ini di VPS sebagai root (lewat console/provider atau sesi root yang masih kebuka):
+
+# 1) pastikan public key ada di root
+mkdir -p /root/.ssh
+chmod 700 /root/.ssh
+grep -qxF 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ7i3bxZa7oZbYPYWd9L7DbLioVKpP2A2pSWLii+EWUS github-actions-deploy' /root/.ssh/authorized_keys || \
+echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ7i3bxZa7oZbYPYWd9L7DbLioVKpP2A2pSWLii+EWUS github-actions-deploy' >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+
+# 2) paksa root cukup 1 public key
+cat > /etc/ssh/sshd_config.d/99-root-github-actions.conf <<'EOF'
+Match User root
+  PubkeyAuthentication yes
+  AuthenticationMethods publickey
+  PermitRootLogin yes
+EOF
+
+# 3) validasi dan reload sshd
+sshd -t && (systemctl reload ssh || systemctl reload sshd)
+
+# 4) cek effective config untuk root
+sshd -T -C user=root,host=31.97.222.155,addr=31.97.222.155 | egrep 'authenticationmethods|permitrootlogin|pubkeyauthentication'
+Lalu dari lokal tes lagi:
+
+ssh -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/github_actions_deploy -p 2221 root@31.97.222.155 'echo SSH_OK'
+Kalau sudah SSH_OK, pastikan GitHub Secrets:
+
+VPS_HOST=31.97.222.155
+VPS_USER=root
+VPS_PORT=2221
