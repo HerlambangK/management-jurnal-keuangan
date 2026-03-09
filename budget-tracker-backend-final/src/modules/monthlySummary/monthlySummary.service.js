@@ -4,6 +4,7 @@ const { MonthlySummary, Transaction, Category } = require('../../../models');
 const config = require('../../config/config');
 const BadRequestError = require('../../errors/BadRequestError');
 const NotFound = require('../../errors/NotFoundError');
+const ServerError = require('../../errors/ServerError');
 
 class MonthlySummaryService {
     constructor() {
@@ -12,6 +13,7 @@ class MonthlySummaryService {
         this.modelBlockUntilByName = new Map();
         this.aiResponseCacheByKey = new Map();
         this.aiCacheTtlMs = this.resolveAiCacheTtlMs();
+        this.lastAiFailure = null;
     }
 
     resolveAiCacheTtlMs() {
@@ -22,6 +24,52 @@ class MonthlySummaryService {
             return 180000;
         }
         return Math.round(rawValue);
+    }
+
+    buildAiUnavailableErrorMessage() {
+        const detail = this.consumeLastAiFailure();
+        if (!detail) {
+            return 'Generate AI gagal: model AI tidak merespons valid. Pastikan OPENROUTER_API_KEY aktif dan coba generate ulang.';
+        }
+
+        const status = Number(detail.status) || null;
+        const modelText = detail.model ? ` (model: ${detail.model})` : '';
+        const rawMessage = String(detail.message || '').trim();
+        const safeMessage = rawMessage ? ` Detail: ${rawMessage}` : '';
+
+        if (status === 401 || status === 403) {
+            return `Generate AI gagal: API key OpenRouter tidak valid/ditolak${modelText}.${safeMessage || ''}`.trim();
+        }
+
+        if (status === 429) {
+            return `Generate AI gagal: OpenRouter kena rate limit atau provider sedang sibuk${modelText}. Tunggu sebentar lalu coba lagi.${safeMessage ? ` ${safeMessage}` : ''}`.trim();
+        }
+
+        if (status && status >= 500) {
+            return `Generate AI gagal: layanan OpenRouter/provider sedang bermasalah${modelText}.${safeMessage ? ` ${safeMessage}` : ''}`.trim();
+        }
+
+        return `Generate AI gagal: model AI tidak merespons valid${modelText}.${safeMessage ? ` ${safeMessage}` : ''}`.trim();
+    }
+
+    setLastAiFailure(detail) {
+        if (!detail || typeof detail !== 'object') {
+            this.lastAiFailure = null;
+            return;
+        }
+
+        this.lastAiFailure = {
+            status: detail.status || null,
+            model: detail.model || null,
+            message: detail.message || 'Unknown error',
+            timestamp: Date.now(),
+        };
+    }
+
+    consumeLastAiFailure() {
+        const detail = this.lastAiFailure;
+        this.lastAiFailure = null;
+        return detail;
     }
 
     normalizeModelId(model) {
@@ -50,7 +98,10 @@ class MonthlySummaryService {
     }
 
     getDefaultOpenRouterFreeModels() {
-        return ['meta-llama/llama-3.2-3b-instruct:free'];
+        return [
+            'meta-llama/llama-3.2-3b-instruct:free',
+            'meta-llama/llama-3.2-1b-instruct:free',
+        ];
     }
 
     buildOpenRouterHeaders(apiKey) {
@@ -78,9 +129,17 @@ class MonthlySummaryService {
         const configuredModels = this.getOpenRouterModelCandidates()
             .map((item) => this.normalizeModelId(item).toLowerCase())
             .filter(Boolean);
+
+        const seen = new Set();
+        const uniqueModels = configuredModels.filter((model) => {
+            if (seen.has(model)) return false;
+            seen.add(model);
+            return true;
+        });
+
         return {
-            configuredModels,
-            models: configuredModels,
+            configuredModels: uniqueModels,
+            models: uniqueModels,
             freeOnly: true,
         };
     }
@@ -160,9 +219,12 @@ class MonthlySummaryService {
             userId,
             historyPoints
         );
-        let aiForecastResult = null;
+        let finalForecast = baselineForecast;
+        let source = 'statistical';
+        let model = null;
+
         if (useAi) {
-            aiForecastResult = this.getCacheEntry(forecastCacheKey);
+            let aiForecastResult = this.getCacheEntry(forecastCacheKey);
             if (!aiForecastResult) {
                 aiForecastResult = await this.requestForecastFromLLM(
                     historyPoints,
@@ -172,17 +234,24 @@ class MonthlySummaryService {
                     this.setCacheEntry(forecastCacheKey, aiForecastResult);
                 }
             }
+
+            if (!aiForecastResult?.data) {
+                return null;
+            }
+
+            finalForecast = aiForecastResult.data;
+            source = 'ai_dynamic';
+            model = aiForecastResult.model || null;
         }
-        const aiForecast = aiForecastResult?.data || null;
-        const finalForecast = aiForecast || baselineForecast;
+
         const confidenceLabel = this.getConfidenceLabel(finalForecast.confidence);
 
         return {
             ...finalForecast,
             confidence_label: confidenceLabel,
             sample_size: historyPoints.length,
-            source: aiForecast ? 'ai+statistical' : 'statistical',
-            model: aiForecast ? aiForecastResult?.model || null : null,
+            source,
+            model,
             history_points: historyPoints.slice(-12).map((point) => ({
                 month: this.formatMonthYearLabel(point.monthIndex, point.year),
                 year: point.year,
@@ -517,8 +586,17 @@ class MonthlySummaryService {
     }
 
     getOpenRouterModelCandidates() {
-        // Start from a fixed free-model baseline only.
-        return this.getDefaultOpenRouterFreeModels();
+        const toList = (value) =>
+            String(value || '')
+                .split(',')
+                .map((item) => this.normalizeModelId(item))
+                .filter(Boolean);
+
+        const primaryModels = toList(process.env.OPENROUTER_MODEL);
+        const fallbackModels = toList(process.env.OPENROUTER_FALLBACK_MODELS);
+        const defaults = this.getDefaultOpenRouterFreeModels();
+
+        return [...primaryModels, ...fallbackModels, ...defaults];
     }
 
     getModelBlockUntil(model) {
@@ -786,13 +864,24 @@ class MonthlySummaryService {
     async requestForecastFromLLM(historyPoints, baselineForecast) {
         const apiKey = config.llm?.openRouter;
         if (!apiKey) {
+            this.setLastAiFailure({
+                status: null,
+                model: null,
+                message: 'OPENROUTER_API_KEY belum diisi.',
+            });
             return null;
         }
 
         const resolvedModels = await this.resolveOpenRouterModels(apiKey);
-        const model = this.getAvailableOpenRouterModels(resolvedModels.models || [])[0];
+        const availableModels = this.getAvailableOpenRouterModels(resolvedModels.models || []);
+        const model = availableModels[0];
         if (!model) {
             this.warnMissingOpenRouterModel();
+            this.setLastAiFailure({
+                status: null,
+                model: null,
+                message: 'Model OpenRouter tidak tersedia.',
+            });
             return null;
         }
 
@@ -800,7 +889,7 @@ class MonthlySummaryService {
         const result = await this.callForecastLLMOnce({
             apiKey,
             model,
-            fallbackModels: [],
+            fallbackModels: availableModels.slice(1, 6),
             prompt,
             timeout: 20000,
             baselineForecast,
@@ -824,89 +913,128 @@ class MonthlySummaryService {
             return null;
         }
 
-        try {
-            const fallbackModelList = Array.isArray(fallbackModels)
-                ? fallbackModels
-                      .map((item) => this.normalizeModelId(item))
-                      .filter(Boolean)
-                : [];
-            const candidatePool = [model, ...fallbackModelList];
-            const isFreeModel = candidatePool.some((item) =>
-                this.isLikelyFreeModel(item)
-            );
-            const effectivePrompt = this.truncatePrompt(
-                prompt,
-                isFreeModel ? 4500 : 8500
-            );
+        const maxAttempts = 3;
 
-            const requestBody = {
-                model,
-                temperature: 0.2,
-                max_tokens: isFreeModel ? 700 : 900,
-                messages: [
-                    {
-                        role: 'system',
-                        content:
-                            'Kamu adalah analis forecasting keuangan pribadi yang ketat pada angka dan memberikan output JSON valid.',
-                    },
-                    {
-                        role: 'user',
-                        content: effectivePrompt,
-                    },
-                ],
-                provider: {
-                    allow_fallbacks: true,
-                    data_collection: 'allow',
-                    sort: 'throughput',
-                },
-            };
-            if (fallbackModelList.length > 0) {
-                requestBody.models = fallbackModelList;
-            }
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+            try {
+                const fallbackModelList = Array.isArray(fallbackModels)
+                    ? fallbackModels
+                          .map((item) => this.normalizeModelId(item))
+                          .filter(Boolean)
+                    : [];
+                const candidatePool = [model, ...fallbackModelList];
+                const isFreeModel = candidatePool.some((item) =>
+                    this.isLikelyFreeModel(item)
+                );
+                const effectivePrompt = this.truncatePrompt(
+                    prompt,
+                    isFreeModel ? 4500 : 8500
+                );
 
-            const response = await axios.post(
-                'https://openrouter.ai/api/v1/chat/completions',
-                requestBody,
-                {
-                    timeout,
-                    headers: this.buildOpenRouterHeaders(apiKey),
+                const requestBody = {
+                    model,
+                    temperature: 0.2,
+                    max_tokens: isFreeModel ? 700 : 900,
+                    messages: [
+                        {
+                            role: 'system',
+                            content:
+                                'Kamu adalah analis forecasting keuangan pribadi yang ketat pada angka dan memberikan output JSON valid.',
+                        },
+                        {
+                            role: 'user',
+                            content: effectivePrompt,
+                        },
+                    ],
+                    provider: {
+                        allow_fallbacks: true,
+                        data_collection: 'allow',
+                        sort: 'throughput',
+                    },
+                };
+                if (fallbackModelList.length > 0) {
+                    requestBody.models = fallbackModelList;
                 }
-            );
 
-            const content = response.data?.choices?.[0]?.message?.content;
-            if (!content) {
+                const response = await axios.post(
+                    'https://openrouter.ai/api/v1/chat/completions',
+                    requestBody,
+                    {
+                        timeout,
+                        headers: this.buildOpenRouterHeaders(apiKey),
+                    }
+                );
+
+                const content = response.data?.choices?.[0]?.message?.content;
+                if (!content) {
+                    this.setLastAiFailure({
+                        status: null,
+                        model,
+                        message: 'Model tidak mengembalikan konten respons.',
+                    });
+                    return null;
+                }
+
+                const parsedJson = this.parseLLMResponse(content);
+                const normalizedData = this.normalizeForecastLLMResponse(
+                    parsedJson,
+                    baselineForecast
+                );
+                if (!normalizedData) {
+                    this.setLastAiFailure({
+                        status: null,
+                        model,
+                        message: 'Format respons AI forecast tidak valid JSON yang diharapkan.',
+                    });
+                    return null;
+                }
+
+                this.setLastAiFailure(null);
+                return {
+                    data: normalizedData,
+                    model: this.normalizeModelId(response.data?.model || model) || model,
+                };
+            } catch (error) {
+                const status = error?.response?.status || null;
+                const message =
+                    error?.response?.data?.error?.message ||
+                    error?.message ||
+                    'Unknown error';
+                const normalizedMessage = String(message || '').toLowerCase();
+                const isRateLimit =
+                    status === 429 || normalizedMessage.includes('rate limit');
+                const canRetry = attempt < maxAttempts && isRateLimit;
+
+                this.setLastAiFailure({
+                    status,
+                    model,
+                    message,
+                });
+
+                if (canRetry) {
+                    const cooldownMs = this.resolveRateLimitCooldownMs({
+                        error,
+                        message,
+                    });
+                    await this.sleep(cooldownMs);
+                    continue;
+                }
+
+                const modelLabel =
+                    fallbackModels.length > 0
+                        ? `${model} (+${fallbackModels.length} fallback)`
+                        : model;
+                this.markModelAsUnavailable(model, { status, message, error });
+                this.logAiErrorOnce('Forecast request', {
+                    status,
+                    model: modelLabel,
+                    message,
+                });
                 return null;
             }
-
-            const parsedJson = this.parseLLMResponse(content);
-            const normalizedData = this.normalizeForecastLLMResponse(
-                parsedJson,
-                baselineForecast
-            );
-            if (!normalizedData) return null;
-
-            return {
-                data: normalizedData,
-                model: this.normalizeModelId(response.data?.model || model) || model,
-            };
-        } catch (error) {
-            const status = error?.response?.status || null;
-            const message =
-                error?.response?.data?.error?.message ||
-                error?.message ||
-                'Unknown error';
-            const modelLabel =
-                fallbackModels.length > 0
-                    ? `${model} (+${fallbackModels.length} fallback)`
-                    : model;
-            this.markModelAsUnavailable(model, { status, message, error });
-            this.logAiErrorOnce('Forecast request', {
-                status,
-                model: modelLabel,
-                message,
-            });
-            return null;
         }
+
+        return null;
     }
 
     buildForecastPrompt(historyPoints, baselineForecast) {
@@ -1154,10 +1282,7 @@ class MonthlySummaryService {
         }
 
         if (!llmResponse) {
-            llmResponse = {
-                ...this.buildFallbackInsight(monthlyStats),
-                key_numbers: this.buildFallbackKeyNumbers(monthlyStats),
-            };
+            throw new ServerError(this.buildAiUnavailableErrorMessage());
         }
 
         const enrichedSummary = this.appendKeyNumbersToSummary(
@@ -1165,12 +1290,20 @@ class MonthlySummaryService {
             llmResponse.key_numbers
         );
 
-        const aiRecommendation = [
-            ...llmResponse.recommendations,
-            llmResponse.trend_analysis,
-        ]
-            .filter(Boolean)
-            .join('\n');
+        const generatedAt = new Date().toISOString();
+        const aiRecommendationPayload = {
+            summary: enrichedSummary,
+            recommendations: llmResponse.recommendations || [],
+            trend_analysis: llmResponse.trend_analysis,
+            key_numbers: Array.isArray(llmResponse.key_numbers)
+                ? llmResponse.key_numbers
+                : [],
+            source: 'ai_dynamic',
+            is_ai_generated: true,
+            generated_at: generatedAt,
+            model: llmResponse.model || null,
+        };
+        const aiRecommendation = JSON.stringify(aiRecommendationPayload);
 
         const useFrontendAsPrimarySource =
             monthlyStats.transactionCount === 0 &&
@@ -1206,6 +1339,8 @@ class MonthlySummaryService {
         return {
             ...llmResponse,
             summary: enrichedSummary,
+            source: 'ai_dynamic',
+            is_ai_generated: true,
             sumber_data: useFrontendAsPrimarySource
                 ? 'frontend'
                 : frontendFinancialData
@@ -1541,13 +1676,24 @@ class MonthlySummaryService {
     async requestInsightFromLLM(monthlyStats, frontendFinancialData = null) {
         const apiKey = config.llm?.openRouter;
         if (!apiKey) {
+            this.setLastAiFailure({
+                status: null,
+                model: null,
+                message: 'OPENROUTER_API_KEY belum diisi.',
+            });
             return null;
         }
 
         const resolvedModels = await this.resolveOpenRouterModels(apiKey);
-        const model = this.getAvailableOpenRouterModels(resolvedModels.models || [])[0];
+        const availableModels = this.getAvailableOpenRouterModels(resolvedModels.models || []);
+        const model = availableModels[0];
         if (!model) {
             this.warnMissingOpenRouterModel();
+            this.setLastAiFailure({
+                status: null,
+                model: null,
+                message: 'Model OpenRouter tidak tersedia.',
+            });
             return null;
         }
 
@@ -1555,11 +1701,11 @@ class MonthlySummaryService {
         return await this.callLLMOnce({
             apiKey,
             model,
-            fallbackModels: [],
+            fallbackModels: availableModels.slice(1, 6),
             prompt,
             timeout: 22000,
             ignoreModelAvailability: false,
-            allowRateLimitRetry: false,
+            allowRateLimitRetry: true,
         });
     }
 
@@ -1576,7 +1722,7 @@ class MonthlySummaryService {
             return null;
         }
 
-        const maxAttempts = allowRateLimitRetry ? 2 : 1;
+        const maxAttempts = allowRateLimitRetry ? 3 : 1;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
             try {
@@ -1631,11 +1777,34 @@ class MonthlySummaryService {
 
                 const content = response.data?.choices?.[0]?.message?.content;
                 if (!content) {
+                    this.setLastAiFailure({
+                        status: null,
+                        model,
+                        message: 'Model tidak mengembalikan konten respons.',
+                    });
                     return null;
                 }
 
                 const parsedJson = this.parseLLMResponse(content);
-                return this.normalizeInsightResponse(parsedJson);
+                const normalized = this.normalizeInsightResponse(parsedJson);
+                if (!normalized) {
+                    this.setLastAiFailure({
+                        status: null,
+                        model,
+                        message: 'Format respons AI tidak valid JSON yang diharapkan.',
+                    });
+                    return null;
+                }
+
+                const resolvedModel = this.normalizeModelId(
+                    response.data?.model || model
+                );
+
+                this.setLastAiFailure(null);
+                return {
+                    ...normalized,
+                    model: resolvedModel || model,
+                };
             } catch (error) {
                 const status = error?.response?.status || null;
                 const message =
@@ -1648,7 +1817,18 @@ class MonthlySummaryService {
                 const canRetry =
                     allowRateLimitRetry && attempt < maxAttempts && isRateLimit;
 
+                this.setLastAiFailure({
+                    status,
+                    model,
+                    message,
+                });
+
                 if (canRetry) {
+                    const cooldownMs = this.resolveRateLimitCooldownMs({
+                        error,
+                        message,
+                    });
+                    await this.sleep(cooldownMs);
                     continue;
                 }
 

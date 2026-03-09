@@ -91,6 +91,10 @@ EOF
   APP_HEALTHCHECK_URL="${APP_HEALTHCHECK_URL:-https://${DOMAIN}}"
   API_HEALTHCHECK_URL="${API_HEALTHCHECK_URL:-https://${DOMAIN}/api/v1/health}"
   API_HEALTHCHECK_PATH="${API_HEALTHCHECK_PATH:-/api/v1/health}"
+  OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
+  OPENROUTER_MODEL="${OPENROUTER_MODEL:-meta-llama/llama-3.2-3b-instruct:free}"
+  OPENROUTER_FALLBACK_MODELS="${OPENROUTER_FALLBACK_MODELS:-meta-llama/llama-3.2-1b-instruct:free}"
+  AI_CACHE_TTL_MS="${AI_CACHE_TTL_MS:-180000}"
 
   if [[ -z "${MYSQL_ROOT_PASSWORD}" || "${MYSQL_ROOT_PASSWORD}" == "replace_with_strong_root_password" ]]; then
     echo "MYSQL_ROOT_PASSWORD belum diisi valid pada ${ROOT_ENV_FILE}"
@@ -137,6 +141,13 @@ ensure_backend_env() {
   upsert_env "DB_DATABASE" "${MYSQL_DATABASE}" "${BACKEND_ENV_FILE}"
   upsert_env "DB_CONNECT_MAX_RETRIES" "30" "${BACKEND_ENV_FILE}"
   upsert_env "DB_CONNECT_RETRY_DELAY_MS" "2000" "${BACKEND_ENV_FILE}"
+  upsert_env "OPENROUTER_MODEL" "${OPENROUTER_MODEL}" "${BACKEND_ENV_FILE}"
+  upsert_env "OPENROUTER_FALLBACK_MODELS" "${OPENROUTER_FALLBACK_MODELS}" "${BACKEND_ENV_FILE}"
+  upsert_env "AI_CACHE_TTL_MS" "${AI_CACHE_TTL_MS}" "${BACKEND_ENV_FILE}"
+
+  if [[ -n "${OPENROUTER_API_KEY}" ]]; then
+    upsert_env "OPENROUTER_API_KEY" "${OPENROUTER_API_KEY}" "${BACKEND_ENV_FILE}"
+  fi
 
   if ! grep -q "^JWT_SECRET=" "${BACKEND_ENV_FILE}"; then
     printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)" >> "${BACKEND_ENV_FILE}"
