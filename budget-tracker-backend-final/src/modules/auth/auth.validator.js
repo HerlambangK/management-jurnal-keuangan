@@ -1,5 +1,58 @@
 const { body, param, query } = require('express-validator');
 
+const optionalClientLocationMetaValidator = [
+  body('client_location.accuracy')
+    .optional()
+    .isFloat({ min: 0, max: 100000 })
+    .withMessage('Akurasi lokasi tidak valid'),
+  body('client_location.source')
+    .optional()
+    .isString()
+    .isLength({ min: 2, max: 40 })
+    .withMessage('Sumber lokasi tidak valid'),
+  body('client_location.captured_at')
+    .optional()
+    .isISO8601()
+    .withMessage('Waktu lokasi tidak valid'),
+  body('client_location.village')
+    .optional()
+    .isString()
+    .isLength({ max: 120 })
+    .withMessage('Nama desa terlalu panjang'),
+  body('client_location.district')
+    .optional()
+    .isString()
+    .isLength({ max: 120 })
+    .withMessage('Nama kecamatan terlalu panjang'),
+  body('client_location.province')
+    .optional()
+    .isString()
+    .isLength({ max: 120 })
+    .withMessage('Nama provinsi terlalu panjang'),
+];
+
+const requiredClientLocationValidator = [
+  body('client_location')
+    .exists({ checkNull: true })
+    .withMessage('Akses lokasi presisi wajib diaktifkan')
+    .bail()
+    .isObject()
+    .withMessage('client_location harus berupa object'),
+  body('client_location.latitude')
+    .exists({ checkNull: true })
+    .withMessage('Latitude wajib dikirim')
+    .bail()
+    .isFloat({ min: -90, max: 90 })
+    .withMessage('Latitude tidak valid'),
+  body('client_location.longitude')
+    .exists({ checkNull: true })
+    .withMessage('Longitude wajib dikirim')
+    .bail()
+    .isFloat({ min: -180, max: 180 })
+    .withMessage('Longitude tidak valid'),
+  ...optionalClientLocationMetaValidator,
+];
+
 const registerValidator = [
   body('name')
     .notEmpty().withMessage('Nama wajib diisi')
@@ -13,6 +66,7 @@ const registerValidator = [
   body('number')
     .optional()
     .isMobilePhone('id-ID').withMessage('Nomor telepon tidak valid'),
+  ...requiredClientLocationValidator,
 ];
 
 const loginValidator = [
@@ -21,6 +75,7 @@ const loginValidator = [
     .isEmail().withMessage('Email tidak valid'),
   body('password')
     .notEmpty().withMessage('Password wajib diisi'),
+  ...requiredClientLocationValidator,
 ];
 
 const updateProfileValidator = [

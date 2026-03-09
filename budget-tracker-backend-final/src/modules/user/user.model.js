@@ -1,27 +1,4 @@
-const SHORT_UUID_LENGTH = 6;
-
-const crypto = require('crypto');
-
-function normalizeUsername(name) {
-    const normalized = String(name || '')
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-
-    return normalized.slice(0, 30) || 'user';
-}
-
-function buildShortUuid() {
-    return crypto
-        .randomUUID()
-        .replace(/-/g, '')
-        .slice(0, SHORT_UUID_LENGTH);
-}
-
-function buildUserPublicId(name) {
-    return `${normalizeUsername(name)}-${buildShortUuid()}`;
-}
+const { buildShortUuid } = require('../../utils/shortUuid');
 
 module.exports = (sequelize, DataTypes) => {
     const User = sequelize.define('User', {
@@ -31,7 +8,7 @@ module.exports = (sequelize, DataTypes) => {
             autoIncrement: true
         },
         uuid: {
-            type: DataTypes.STRING(80),
+            type: DataTypes.STRING(6),
             allowNull: false,
             unique: true
         },
@@ -75,7 +52,7 @@ module.exports = (sequelize, DataTypes) => {
         hooks: {
             beforeValidate: (user) => {
                 if (!user.uuid) {
-                    user.uuid = buildUserPublicId(user.name);
+                    user.uuid = buildShortUuid();
                 }
             },
         },

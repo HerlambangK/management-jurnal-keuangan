@@ -1,9 +1,16 @@
+const { buildShortUuid } = require('../../utils/shortUuid');
+
 module.exports = (sequelize, DataTypes) => {
     const Transaction = sequelize.define('Transaction', {
         id: {
             type: DataTypes.INTEGER,
             primaryKey: true,
             autoIncrement: true
+        },
+        uuid: {
+            type: DataTypes.STRING(6),
+            allowNull: false,
+            unique: true
         },
         type: {
             type: DataTypes.ENUM('income', 'expense'),
@@ -42,7 +49,14 @@ module.exports = (sequelize, DataTypes) => {
     }, {
         tableName: 'transactions',
         timestamp: true,
-        underscored: true
+        underscored: true,
+        hooks: {
+            beforeValidate: (transaction) => {
+                if (!transaction.uuid) {
+                    transaction.uuid = buildShortUuid();
+                }
+            },
+        },
     });
     
     Transaction.associate = (models) => {

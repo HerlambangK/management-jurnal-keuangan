@@ -1,6 +1,19 @@
+export interface ClientLocationPayload {
+  latitude: number;
+  longitude: number;
+  accuracy?: number | null;
+  source: string;
+  captured_at?: string;
+  timezone?: string;
+  village?: string;
+  district?: string;
+  province?: string;
+}
+
 export interface LoginData {
   email: string;
   password: string;
+  client_location: ClientLocationPayload;
 }
 
 export interface RegisterData extends LoginData {
@@ -24,6 +37,13 @@ export interface LoginSessionItem {
   ip_address: string;
   device: string;
   location: string;
+  location_chrome?: string;
+  location_ip?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  location_accuracy_m?: number | null;
+  location_source?: string | null;
+  location_captured_at?: string | null;
   user_agent?: string;
   logged_in_at: string;
   is_current?: boolean;

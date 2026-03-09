@@ -1,4 +1,3 @@
-const BadRequestError = require('../../errors/BadRequestError');
 const ForbiddenError = require('../../errors/ForbiddenError');
 const TransactionService = require('./transaction.service');
 
@@ -28,7 +27,7 @@ class TransactionController {
         try {
             const transaction = await TransactionService.getById(req.params.id);
             if(transaction.user_id !== req.userId) {
-                return ForbiddenError("Kamu tidak bisa Akses transaksi ini")
+                throw new ForbiddenError("Kamu tidak bisa Akses transaksi ini");
             }
             res.status(200).json({succes: true, message: "transaksi ditemukan", data: transaction});
         } catch (error) {
@@ -68,6 +67,10 @@ class TransactionController {
 
     async delete(req, res, next) {
         try {
+            const transaction = await TransactionService.getById(req.params.id);
+            if (transaction.user_id !== req.userId) {
+                throw new ForbiddenError("Kamu tidak bisa Akses transaksi ini");
+            }
             await TransactionService.delete(req.params.id);
             res.status(200).json({succes: true, message: "transaksi sudah di hapus"});
         } catch (error) {

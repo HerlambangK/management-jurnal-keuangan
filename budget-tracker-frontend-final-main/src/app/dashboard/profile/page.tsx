@@ -15,6 +15,7 @@ import LoadingSpinnerScreen from "@/ui/LoadingSpinnerScreen";
 import Modal from "@/ui/Modal";
 import { ModalProps } from "@/interfaces/IModal";
 import { ApiServiceError, toApiServiceError } from "@/utils/handleApiError";
+import { resolveClientLocation } from "@/utils/clientLocation";
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 const PROFILE_CACHE_KEY = "auth_profile_cache_v1";
@@ -26,7 +27,7 @@ type ProfileForm = {
 };
 
 type ProfileMeta = {
-  id: number;
+  userId: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -64,8 +65,14 @@ const formatSessionTime = (value: string): string => {
   });
 };
 
-const formatSessionLocation = (session: LoginSessionItem): string => {
-  const location = String(session.location || "").trim();
+const formatSessionChromeLocation = (session: LoginSessionItem): string => {
+  const location = String(session.location_chrome || "").trim();
+  if (location) return location;
+  return "Tidak diketahui. Izinkan lokasi di Chrome.";
+};
+
+const formatSessionIpLocation = (session: LoginSessionItem): string => {
+  const location = String(session.location_ip || "").trim();
   if (location) return location;
 
   const ip = String(session.ip_address || "").trim();
@@ -73,6 +80,26 @@ const formatSessionLocation = (session: LoginSessionItem): string => {
     return "Tidak diketahui (IP publik tidak tersedia)";
   }
   return `Tidak diketahui (berdasarkan IP ${ip})`;
+};
+
+const formatSessionCoordinates = (session: LoginSessionItem): string => {
+  const latitude = Number(session.latitude);
+  const longitude = Number(session.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return "-";
+  }
+  return `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+};
+
+const hasSessionCoordinates = (session: LoginSessionItem): boolean => {
+  const latitude = Number(session.latitude);
+  const longitude = Number(session.longitude);
+  return Number.isFinite(latitude) && Number.isFinite(longitude);
+};
+
+const hasKnownChromeLocation = (session: LoginSessionItem): boolean => {
+  const location = String(session.location_chrome || "").trim();
+  return Boolean(location) && !/^tidak diketahui/i.test(location);
 };
 
 const toFriendlyError = (error: ApiServiceError): string => {
@@ -91,7 +118,7 @@ export default function ProfilePage() {
     number: "",
   });
   const [meta, setMeta] = useState<ProfileMeta>({
-    id: 0,
+    userId: "",
     createdAt: "",
     updatedAt: "",
   });
@@ -104,10 +131,12 @@ export default function ProfilePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modal, setModal] = useState<ModalProps | null>(null);
   const [networkWarning, setNetworkWarning] = useState<string | null>(null);
+  const [locationPermissionHint, setLocationPermissionHint] = useState<string | null>(null);
 
   const applyProfileState = (
     profileData: {
       id: number;
+      uuid?: string;
       name: string;
       email: string;
       number: string | null;
@@ -124,7 +153,7 @@ export default function ProfilePage() {
       number: stripPhonePrefix(profileData.number),
     });
     setMeta({
-      id: profileData.id || 0,
+      userId: String(profileData.uuid || profileData.id || ""),
       createdAt: profileData.created_at || "",
       updatedAt: profileData.updated_at || "",
     });
@@ -168,7 +197,12 @@ export default function ProfilePage() {
         return;
       }
 
-      const { data, error } = await profileSafe(token);
+      const clientLocation = await resolveClientLocation({
+        timeoutMs: 3500,
+        enableHighAccuracy: true,
+      });
+
+      const { data, error } = await profileSafe(token, clientLocation);
       if (error) {
         if (error.isUnauthorized) {
           logout();
@@ -199,14 +233,27 @@ export default function ProfilePage() {
       }
 
       try {
-        const sessionRes = await fetchLoginSessions(3);
+        const sessionRes = await fetchLoginSessions(3, clientLocation);
         const latestSessions = Array.isArray(sessionRes?.data)
           ? sessionRes.data
           : profileData?.sessions || [];
         setSessions(latestSessions);
         syncCachedSessions(latestSessions);
+        const shouldShowHint =
+          !clientLocation ||
+          latestSessions.some((session) => !hasKnownChromeLocation(session));
+        setLocationPermissionHint(
+          shouldShowHint
+            ? "Lokasi Chrome belum terdeteksi. Izinkan akses lokasi: klik ikon gembok di address bar Chrome > Site settings > Location > Allow, lalu refresh halaman."
+            : null
+        );
       } catch {
         // Keep sessions from profile response if dedicated request fails
+        setLocationPermissionHint(
+          !clientLocation
+            ? "Lokasi Chrome belum aktif. Izinkan lokasi di Chrome agar data lokasi perangkat bisa terbaca."
+            : null
+        );
       } finally {
         setLoading(false);
       }
@@ -533,7 +580,7 @@ export default function ProfilePage() {
             <dl className="mt-3 space-y-2 text-sm text-slate-600">
               <div className="flex items-center justify-between gap-3">
                 <dt>ID User</dt>
-                <dd className="font-medium text-slate-800">{meta.id || "-"}</dd>
+                <dd className="font-medium text-slate-800">{meta.userId || "-"}</dd>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <dt>Email</dt>
@@ -568,6 +615,9 @@ export default function ProfilePage() {
                 {isClearingSessions ? "Menghapus..." : "Hapus Semua (Login Ulang)"}
               </button>
             </div>
+            {locationPermissionHint && (
+              <p className="mt-2 text-xs text-amber-700">{locationPermissionHint}</p>
+            )}
             {sessions.length === 0 ? (
               <p className="mt-3 text-sm text-slate-500">Belum ada data sesi login.</p>
             ) : (
@@ -615,8 +665,21 @@ export default function ProfilePage() {
                     </div>
                     <p className="mt-1 text-xs text-slate-600">IP: {session.ip_address || "-"}</p>
                     <p className="text-xs text-slate-600">
-                      Lokasi: {formatSessionLocation(session)}
+                      Lokasi Chrome: {formatSessionChromeLocation(session)}
                     </p>
+                    <p className="text-xs text-slate-600">
+                      Lokasi IP: {formatSessionIpLocation(session)}
+                    </p>
+                    {hasSessionCoordinates(session) && (
+                      <p className="text-xs text-slate-600">
+                        Latitude, Longitude: {formatSessionCoordinates(session)}
+                      </p>
+                    )}
+                    {Number.isFinite(Number(session.location_accuracy_m)) && (
+                      <p className="text-xs text-slate-500">
+                        Akurasi: {Number(session.location_accuracy_m).toFixed(2)} m
+                      </p>
+                    )}
                     <p className="text-xs text-slate-500">{formatSessionTime(session.logged_in_at)}</p>
                   </div>
                 ))}

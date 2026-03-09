@@ -8,6 +8,7 @@ import Modal from "@/ui/Modal";
 import LoadingSpinnerScreen from "@/ui/LoadingSpinnerScreen";
 import { ModalProps } from "@/interfaces/IModal";
 import { TransactionFormData } from "@/interfaces/ITransaction";
+import { emitTransactionSync } from "@/utils/transactionSync";
 
 
 export default function EditTransactionPage() {
@@ -65,7 +66,9 @@ export default function EditTransactionPage() {
         try {
             await editTransaction(Number(id), {
                 ...form,
+                category_id: form.categoryId,
             });
+            emitTransactionSync("edit-transaction-page");
 
             setModal({
                 type: "success",

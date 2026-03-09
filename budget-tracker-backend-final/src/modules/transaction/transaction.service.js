@@ -5,8 +5,64 @@ const BadRequestError = require('../../errors/BadRequestError');
 
 class TransactionService {
     toNumber(value) {
-        const parsed = Number(value);
+        if (typeof value === "number") {
+            return Number.isFinite(value) ? value : 0;
+        }
+
+        if (typeof value !== "string") return 0;
+
+        let cleaned = value.trim().replace(/[^\d,.-]/g, "");
+        if (!cleaned) return 0;
+
+        const lastComma = cleaned.lastIndexOf(",");
+        const lastDot = cleaned.lastIndexOf(".");
+
+        if (lastComma !== -1 && lastDot !== -1) {
+            if (lastComma > lastDot) {
+                cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+            } else {
+                cleaned = cleaned.replace(/,/g, "");
+            }
+        } else if (lastComma !== -1) {
+            const parts = cleaned.split(",");
+            if (parts.length === 2 && parts[1].length <= 2) {
+                cleaned = `${parts[0].replace(/,/g, "")}.${parts[1]}`;
+            } else {
+                cleaned = cleaned.replace(/,/g, "");
+            }
+        } else {
+            const dotParts = cleaned.split(".");
+            if (dotParts.length > 2) {
+                cleaned = dotParts.join("");
+            } else if (dotParts.length === 2 && dotParts[1].length === 3) {
+                cleaned = dotParts.join("");
+            }
+        }
+
+        const parsed = Number(cleaned);
         return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    toStoredAmount(value) {
+        const amount = Math.round(this.toNumber(value));
+        if (!Number.isFinite(amount) || amount <= 0) {
+            throw new BadRequestError("Jumlah transaksi harus lebih dari 0");
+        }
+
+        return String(amount);
+    }
+
+    async sumTransactionAmountByType(whereClause, type) {
+        const rows = await Transaction.findAll({
+            where: {
+                ...whereClause,
+                type,
+            },
+            attributes: ["amount"],
+            raw: true,
+        });
+
+        return rows.reduce((total, row) => total + this.toNumber(row.amount), 0);
     }
 
     buildRecentMonthKeys(referenceDate, months = 6) {
@@ -92,23 +148,10 @@ class TransactionService {
             };
         }
 
-        const [incomeRaw, expenseRaw] = await Promise.all([
-            Transaction.sum("amount", {
-                where: {
-                    ...baseWhere,
-                    type: "income",
-                },
-            }),
-            Transaction.sum("amount", {
-                where: {
-                    ...baseWhere,
-                    type: "expense",
-                },
-            }),
+        const [income, expense] = await Promise.all([
+            this.sumTransactionAmountByType(baseWhere, "income"),
+            this.sumTransactionAmountByType(baseWhere, "expense"),
         ]);
-
-        const income = this.toNumber(incomeRaw);
-        const expense = this.toNumber(expenseRaw);
         return income - expense;
     }
 
@@ -161,7 +204,9 @@ class TransactionService {
     }
 
     async getAllByUser(userId, page = 1, limit = 10, search = "", monthFilter = null) {
-        const offset = (page - 1) * limit;
+        const safePage = Math.max(1, Number(page) || 1);
+        const safeLimit = Math.max(1, Number(limit) || 10);
+        const offset = (safePage - 1) * safeLimit;
         const whereClause = {
             user_id: userId
         }
@@ -174,11 +219,48 @@ class TransactionService {
             };
         }
 
-        if(search){
-            whereClause[Op.or] = [
-                {note: { [Op.like]: `%${search}%`}},
-                {desc: { [Op.like]: `%${search}%`}},
-            ]
+        const searchText = typeof search === "string" ? search.trim() : "";
+        if (searchText) {
+            const loweredSearch = searchText.toLowerCase();
+            const searchClauses = [
+                { note: { [Op.like]: `%${searchText}%` } },
+                { "$category.name$": { [Op.like]: `%${searchText}%` } },
+            ];
+
+            const numericSearch = searchText.replace(/\D/g, "");
+            if (numericSearch) {
+                searchClauses.push({ amount: { [Op.like]: `%${numericSearch}%` } });
+            }
+
+            const typeMatches = [];
+            if (
+                loweredSearch.includes("income") ||
+                loweredSearch.includes("masuk") ||
+                loweredSearch.includes("pemasukan")
+            ) {
+                typeMatches.push("income");
+            }
+            if (
+                loweredSearch.includes("expense") ||
+                loweredSearch.includes("keluar") ||
+                loweredSearch.includes("pengeluaran")
+            ) {
+                typeMatches.push("expense");
+            }
+            if (typeMatches.length > 0) {
+                searchClauses.push({ type: { [Op.in]: typeMatches } });
+            }
+
+            if (/^\d{4}-\d{2}-\d{2}$/.test(searchText)) {
+                const date = new Date(`${searchText}T00:00:00`);
+                if (!Number.isNaN(date.getTime())) {
+                    const start = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+                    const end = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+                    searchClauses.push({ date: { [Op.between]: [start, end] } });
+                }
+            }
+
+            whereClause[Op.or] = searchClauses;
         }
 
         const { count, rows } = await Transaction.findAndCountAll({
@@ -188,28 +270,29 @@ class TransactionService {
                     model: Category,
                     attributes: ["name", "description"],
                     as: "category",
-                    require: false
+                    required: false
                 },
                 {
                     model: User,
                     attributes: ["id", "name", "email", "number"],
                     as: "user",
-                    require: false
+                    required: false
                 }
             ],
             order: [["date", "DESC"]],
-            limit,
+            limit: safeLimit,
             offset,
             distinct: true,
+            subQuery: false,
         })
 
         return {
             data: rows,
             pagination: {
                 total: count,
-                page,
-                limit,
-                totalPage: Math.ceil(count / limit)
+                page: safePage,
+                limit: safeLimit,
+                totalPage: Math.ceil(count / safeLimit)
             }
         }
     }
@@ -222,13 +305,13 @@ class TransactionService {
                     model: Category,
                     attributes: ["name", "description"],
                     as: "category",
-                    require: false
+                    required: false
                 },
                 {
                     model: User,
                     attributes: ["id", "name", "email", "number"],
                     as: "user",
-                    require: false
+                    required: false
                 }
             ],
         });
@@ -238,8 +321,12 @@ class TransactionService {
     }
 
     async create(data) {
-        const txType = data?.type === "income" ? "income" : "expense";
-        const txAmount = this.toNumber(data?.amount);
+        const payload = {
+            ...data,
+            amount: this.toStoredAmount(data?.amount),
+        };
+        const txType = payload.type === "income" ? "income" : "expense";
+        const txAmount = this.toNumber(payload.amount);
         const txDate = this.toValidDate(data?.date);
 
         if (txType === "expense") {
@@ -255,19 +342,24 @@ class TransactionService {
             }
         }
 
-        return await Transaction.create(data);
+        return await Transaction.create(payload);
     }
 
     async update(id, data) {
         const transaction = await Transaction.findByPk(id);
         if(!transaction) throw new NotFound("Transaksi Tidak ditemukan");
 
+        const sanitizedData = { ...data };
+        if (Object.prototype.hasOwnProperty.call(data, "amount")) {
+            sanitizedData.amount = this.toStoredAmount(data.amount);
+        }
+
         const effectiveType =
             data?.type === "income" || data?.type === "expense"
                 ? data.type
                 : transaction.type;
         const effectiveAmount = this.toNumber(
-            data?.amount !== undefined ? data.amount : transaction.amount
+            sanitizedData?.amount !== undefined ? sanitizedData.amount : transaction.amount
         );
         const effectiveDate = this.toValidDate(
             data?.date !== undefined ? data.date : transaction.date
@@ -286,7 +378,7 @@ class TransactionService {
                 );
             }
         }
-        return await transaction.update(data);
+        return await transaction.update(sanitizedData);
     }
 
     async delete(id) {
@@ -312,7 +404,7 @@ class TransactionService {
         let totalExpense = 0;
 
         for (const tx of transactions){
-            const amount = parseInt(tx.amount);
+            const amount = this.toNumber(tx.amount);
 
             if(tx.type === "income") totalIncome += amount;
             if(tx.type === "expense") totalExpense += amount
@@ -361,7 +453,7 @@ class TransactionService {
         for (const tx of transactions){
             const date = new Date(tx.date);
             const day = date.getDate();
-            const amount = parseInt(tx.amount);
+            const amount = this.toNumber(tx.amount);
 
             if(chartData[day - 1]) {
                 if(tx.type === "income") chartData[day - 1].income += amount;
@@ -402,29 +494,17 @@ class TransactionService {
             }
         }
 
-        const [accumulatedIncomeRaw, accumulatedExpenseRaw] = await Promise.all([
-            Transaction.sum("amount", {
-                where: {
-                    user_id: userId,
-                    type: "income",
-                    date: {
-                        [Op.lte]: activeRange.end,
-                    },
-                },
-            }),
-            Transaction.sum("amount", {
-                where: {
-                    user_id: userId,
-                    type: "expense",
-                    date: {
-                        [Op.lte]: activeRange.end,
-                    },
-                },
-            }),
-        ]);
+        const baseAccumulatedWhere = {
+            user_id: userId,
+            date: {
+                [Op.lte]: activeRange.end,
+            },
+        };
 
-        const accumulatedIncome = this.toNumber(accumulatedIncomeRaw);
-        const accumulatedExpense = this.toNumber(accumulatedExpenseRaw);
+        const [accumulatedIncome, accumulatedExpense] = await Promise.all([
+            this.sumTransactionAmountByType(baseAccumulatedWhere, "income"),
+            this.sumTransactionAmountByType(baseAccumulatedWhere, "expense"),
+        ]);
         const closingBalance = accumulatedIncome - accumulatedExpense;
         const monthlyBalance = monthlyIncome - monthlyExpense;
         const openingBalance = closingBalance - monthlyBalance;
@@ -506,13 +586,13 @@ class TransactionService {
                     model: Category,
                     attributes: ["name", "description"],
                     as: "category",
-                    require: false
+                    required: false
                 },
                 {
                     model: User,
                     attributes: ["id", "name", "email", "number"],
                     as: "user",
-                    require: false
+                    required: false
                 }
             ],
         });
@@ -537,7 +617,7 @@ class TransactionService {
             order: [["date", "DESC"]],
         });
 
-        const total = transactions.reduce((sum, tx) => sum + parseInt(tx.amount), 0);
+        const total = transactions.reduce((sum, tx) => sum + this.toNumber(tx.amount), 0);
 
         return {
             total_expense: total,

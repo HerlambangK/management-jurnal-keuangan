@@ -1,9 +1,16 @@
+const { buildShortUuid } = require('../../utils/shortUuid');
+
 module.exports = (sequelize, DataTypes) => {
     const Category = sequelize.define('Category', {
         id: {
             type: DataTypes.INTEGER, 
             primaryKey: true, 
             autoIncrement: true
+        },
+        uuid: {
+            type: DataTypes.STRING(6),
+            allowNull: false,
+            unique: true
         },
         name: {
             type: DataTypes.STRING,
@@ -26,7 +33,14 @@ module.exports = (sequelize, DataTypes) => {
     }, {
         tableName: 'categories',
         timestamp: true,
-        underscored: true
+        underscored: true,
+        hooks: {
+            beforeValidate: (category) => {
+                if (!category.uuid) {
+                    category.uuid = buildShortUuid();
+                }
+            },
+        },
     });
 
     Category.associate = (models) => {

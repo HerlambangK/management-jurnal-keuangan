@@ -1,9 +1,16 @@
+const { buildShortUuid } = require('../../utils/shortUuid');
+
 module.exports = (sequelize, DataTypes) => {
     const MonthlySummary = sequelize.define('MonthlySummary', {
         id: {
             type: DataTypes.INTEGER,
             primaryKey: true,
             autoIncrement: true
+        },
+        uuid: {
+            type: DataTypes.STRING(6),
+            allowNull: false,
+            unique: true
         },
         month: {
             type: DataTypes.STRING(25),
@@ -53,7 +60,14 @@ module.exports = (sequelize, DataTypes) => {
         modelName: 'MonthlySummary',
         tableName: "monthly_summaries",
         timestamp: false,
-        underscored: true
+        underscored: true,
+        hooks: {
+            beforeValidate: (summary) => {
+                if (!summary.uuid) {
+                    summary.uuid = buildShortUuid();
+                }
+            },
+        },
     });
 
     MonthlySummary.associate = (models) => {

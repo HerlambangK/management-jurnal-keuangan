@@ -44,6 +44,7 @@ const parseAmount = (amount: string | number): number => {
   } else {
     const dotParts = cleaned.split(".");
     if (dotParts.length > 2) cleaned = dotParts.join("");
+    else if (dotParts.length === 2 && dotParts[1].length === 3) cleaned = dotParts.join("");
   }
 
   const parsed = Number(cleaned);

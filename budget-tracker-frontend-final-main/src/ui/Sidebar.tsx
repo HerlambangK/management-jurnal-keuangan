@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { IconType } from "react-icons";
@@ -22,6 +22,7 @@ import { logout, profileSafe } from "@/services/auth";
 import { fetchMonthlySummary, fetchTodayTransaction } from "@/services/transaction";
 import { toApiServiceError } from "@/utils/handleApiError";
 import formatRupiah from "@/utils/formatRupiah";
+import { subscribeTransactionSync } from "@/utils/transactionSync";
 
 type NavItem = {
   href: string;
@@ -188,6 +189,26 @@ const Sidebar = () => {
   const [financialSummary, setFinancialSummary] = useState<FinancialSummary>(defaultFinancialSummary);
   const [financialActivities, setFinancialActivities] = useState<FinancialActivity[]>([]);
   const [isPulseLoading, setIsPulseLoading] = useState(true);
+  const [isSyncPulseActive, setIsSyncPulseActive] = useState(false);
+
+  const isMountedRef = useRef(true);
+  const syncPulseTimeoutRef = useRef<number | null>(null);
+
+  const triggerSyncPulse = useCallback(() => {
+    if (typeof window === "undefined") return;
+
+    if (syncPulseTimeoutRef.current) {
+      window.clearTimeout(syncPulseTimeoutRef.current);
+    }
+
+    setIsSyncPulseActive(false);
+    window.requestAnimationFrame(() => {
+      setIsSyncPulseActive(true);
+      syncPulseTimeoutRef.current = window.setTimeout(() => {
+        setIsSyncPulseActive(false);
+      }, 1100);
+    });
+  }, []);
 
   const applyUserState = useCallback((rawUser: Partial<ProfileData>) => {
     const safeName = typeof rawUser.name === "string" && rawUser.name.trim() ? rawUser.name.trim() : "User";
@@ -283,13 +304,22 @@ const Sidebar = () => {
     };
   }, []);
 
-  useEffect(() => {
-    let isMounted = true;
+  useEffect(
+    () => () => {
+      isMountedRef.current = false;
+      if (typeof window === "undefined") return;
+      if (syncPulseTimeoutRef.current) {
+        window.clearTimeout(syncPulseTimeoutRef.current);
+      }
+    },
+    []
+  );
 
-    const loadFinancialPulse = async () => {
+  const loadFinancialPulse = useCallback(
+    async (withSyncPulse = false) => {
       setIsPulseLoading(true);
       const [summaryRes, activityRes] = await Promise.allSettled([fetchMonthlySummary(), fetchTodayTransaction()]);
-      if (!isMounted) return;
+      if (!isMountedRef.current) return;
 
       if (summaryRes.status === "fulfilled") {
         setFinancialSummary(parseFinancialSummary(summaryRes.value?.data));
@@ -313,15 +343,24 @@ const Sidebar = () => {
         }
       }
 
+      if (withSyncPulse) {
+        triggerSyncPulse();
+      }
+
       setIsPulseLoading(false);
-    };
+    },
+    [router, triggerSyncPulse]
+  );
 
-    void loadFinancialPulse();
+  useEffect(() => {
+    void loadFinancialPulse(false);
+  }, [loadFinancialPulse]);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [router]);
+  useEffect(() => {
+    return subscribeTransactionSync(() => {
+      void loadFinancialPulse(true);
+    });
+  }, [loadFinancialPulse]);
 
   useEffect(() => {
     setIsMobileOpen(false);
@@ -376,23 +415,28 @@ const Sidebar = () => {
     window.location.href = "/";
   };
 
-  const renderAvatar = (sizeClass: string) => {
+  const renderAvatar = (sizeClass: string, variant: "hero" | "panel" = "hero") => {
+    const avatarBorderClass = variant === "hero" ? "border-white/40" : "border-slate-200";
+
     if (avatarUrl) {
       return (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={avatarUrl}
           alt="Avatar"
-          className={`${sizeClass} rounded-2xl border border-white/40 object-cover`}
+          className={`${sizeClass} rounded-2xl border ${avatarBorderClass} object-cover`}
           onError={() => setAvatarUrl(null)}
         />
       );
     }
 
+    const fallbackClass =
+      variant === "hero"
+        ? "border-white/40 bg-white/25 text-white"
+        : "border-slate-200 bg-slate-100 text-slate-700";
+
     return (
-      <span
-        className={`grid ${sizeClass} place-content-center rounded-2xl border border-white/40 bg-white/25 text-sm font-semibold text-white`}
-      >
+      <span className={`grid ${sizeClass} place-content-center rounded-2xl border text-sm font-semibold ${fallbackClass}`}>
         {initial}
       </span>
     );
@@ -408,25 +452,24 @@ const Sidebar = () => {
             key={href}
             href={href}
             onClick={() => setIsMobileOpen(false)}
-            className={`group relative flex items-start gap-3 overflow-hidden rounded-2xl border px-3 py-3 transition ${
+            className={`group relative flex items-center gap-3 rounded-xl border px-3 py-2.5 transition ${
               isActive
-                ? "border-sky-200 bg-white shadow-sm"
-                : "border-transparent bg-slate-50/70 hover:border-slate-200 hover:bg-white"
+                ? "border-sky-200 bg-sky-50/70"
+                : "border-transparent bg-slate-50/80 hover:border-slate-200 hover:bg-white"
             }`}
           >
-            {isActive && <span className="absolute inset-y-2 left-0 w-1 rounded-r-full bg-sky-500" />}
             <span
-              className={`mt-0.5 grid h-8 w-8 place-content-center rounded-xl bg-gradient-to-br text-white ${
+              className={`grid h-8 w-8 shrink-0 place-content-center rounded-xl bg-gradient-to-br text-white ${
                 isActive ? accent : "from-slate-400 to-slate-500"
               }`}
             >
               <Icon className="h-4 w-4" />
             </span>
-            <span className="min-w-0">
+            <span className="min-w-0 flex-1">
               <span className={`block text-sm font-semibold ${isActive ? "text-slate-900" : "text-slate-700"}`}>
                 {label}
               </span>
-              <span className="mt-0.5 block text-xs text-slate-500">{description}</span>
+              {isActive ? <span className="mt-0.5 block text-xs text-slate-500">{description}</span> : null}
             </span>
           </Link>
         );
@@ -435,7 +478,7 @@ const Sidebar = () => {
   );
 
   const renderFinancialPulse = () => (
-    <section className="mt-4 rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 p-3.5">
+    <section className={`mt-4 rounded-2xl border border-slate-200 bg-white p-3.5 ${isSyncPulseActive ? "pulse-soft" : ""}`}>
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Financial Pulse</p>
         <FiBarChart2 className="h-3.5 w-3.5 text-slate-500" />
@@ -443,29 +486,25 @@ const Sidebar = () => {
 
       {isPulseLoading ? (
         <div className="mt-3 space-y-2">
-          <div className="h-7 animate-pulse rounded-lg bg-slate-100" />
-          <div className="h-7 animate-pulse rounded-lg bg-slate-100" />
-          <div className="h-7 animate-pulse rounded-lg bg-slate-100" />
+          <div className="h-6 animate-pulse rounded-lg bg-slate-100" />
+          <div className="h-6 animate-pulse rounded-lg bg-slate-100" />
+          <div className="h-6 animate-pulse rounded-lg bg-slate-100" />
+          <div className="h-6 animate-pulse rounded-lg bg-slate-100" />
         </div>
       ) : (
         <>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
-            <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 px-2.5 py-2">
-              <p className="text-slate-500">Masuk</p>
-              <p className="font-semibold text-emerald-700">{formatRupiah(financialSummary.income)}</p>
-            </div>
-            <div className="rounded-xl border border-rose-100 bg-rose-50/80 px-2.5 py-2">
-              <p className="text-slate-500">Keluar</p>
-              <p className="font-semibold text-rose-700">{formatRupiah(financialSummary.expense)}</p>
-            </div>
-            <div className="rounded-xl border border-indigo-100 bg-indigo-50/80 px-2.5 py-2">
-              <p className="text-slate-500">Saldo</p>
-              <p className="font-semibold text-indigo-700">{formatRupiah(financialSummary.balance)}</p>
-            </div>
-            <div className="rounded-xl border border-cyan-100 bg-cyan-50/80 px-2.5 py-2">
-              <p className="text-slate-500">Tabungan</p>
-              <p className="font-semibold text-cyan-700">{formatRupiah(financialSummary.saving)}</p>
-            </div>
+          <div className="mt-3 space-y-1.5 text-[11px]">
+            {[
+              { label: "Masuk", value: financialSummary.income, tone: "text-emerald-700" },
+              { label: "Keluar", value: financialSummary.expense, tone: "text-rose-700" },
+              { label: "Saldo", value: financialSummary.balance, tone: "text-indigo-700" },
+              { label: "Tabungan", value: financialSummary.saving, tone: "text-cyan-700" },
+            ].map((item) => (
+              <div key={item.label} className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+                <p className="text-slate-500">{item.label}</p>
+                <p className={`font-semibold ${item.tone}`}>{formatRupiah(item.value)}</p>
+              </div>
+            ))}
           </div>
 
           <div className="mt-3">
@@ -481,24 +520,31 @@ const Sidebar = () => {
             </div>
           </div>
 
-          <div className="mt-3 space-y-1.5">
+          <div className="mt-3">
             {financialActivities.length === 0 ? (
               <p className="rounded-lg border border-dashed border-slate-200 px-2.5 py-2 text-[11px] text-slate-500">
                 Belum ada transaksi hari ini.
               </p>
             ) : (
-              financialActivities.map((item) => (
-                <div key={item.id} className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="truncate text-[11px] font-medium text-slate-700">{item.note || item.categoryName}</p>
-                    <p className={`text-[11px] font-semibold ${item.type === "income" ? "text-emerald-700" : "text-rose-700"}`}>
-                      {item.type === "income" ? "+" : "-"}
-                      {formatRupiah(item.amount)}
-                    </p>
-                  </div>
-                  <p className="text-[10px] text-slate-500">{formatActivityDate(item.date)}</p>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="truncate text-[11px] font-medium text-slate-700">
+                    {financialActivities[0].note || financialActivities[0].categoryName}
+                  </p>
+                  <p
+                    className={`text-[11px] font-semibold ${
+                      financialActivities[0].type === "income" ? "text-emerald-700" : "text-rose-700"
+                    }`}
+                  >
+                    {financialActivities[0].type === "income" ? "+" : "-"}
+                    {formatRupiah(financialActivities[0].amount)}
+                  </p>
                 </div>
-              ))
+                <p className="text-[10px] text-slate-500">{formatActivityDate(financialActivities[0].date)}</p>
+                {financialActivities.length > 1 ? (
+                  <p className="mt-1 text-[10px] text-slate-400">+{financialActivities.length - 1} transaksi lainnya</p>
+                ) : null}
+              </div>
             )}
           </div>
         </>
@@ -604,27 +650,18 @@ const Sidebar = () => {
           <h1 className="mt-1 text-lg font-semibold">Budget Tracker</h1>
           <p className="mt-1 text-xs text-cyan-100/90">Halo, {shortName(profileData?.name)}</p>
 
-          <div className="mt-3 flex items-center justify-between text-[11px] text-cyan-100/90">
+          <div className="mt-3 text-[11px] text-cyan-100/90">
             <span>{todayLabel}</span>
-            <span className="rounded-full border border-white/30 bg-white/15 px-2 py-0.5">{activeLabel}</span>
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className="mt-3">
             <Link
-              href="/dashboard/transaction"
+              href="/dashboard/transaction/create"
               onClick={() => setIsMobileOpen(false)}
-              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/40 bg-white/15 px-2 py-2 text-[11px] font-medium text-white transition hover:bg-white/25"
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-white/40 bg-white/15 px-2 py-2 text-[11px] font-medium text-white transition hover:bg-white/25"
             >
               <FiPlus className="h-3.5 w-3.5" />
-              Transaksi
-            </Link>
-            <Link
-              href="/dashboard/summary"
-              onClick={() => setIsMobileOpen(false)}
-              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/40 bg-white px-2 py-2 text-[11px] font-semibold text-sky-800 transition hover:bg-cyan-50"
-            >
-              <FiPieChart className="h-3.5 w-3.5" />
-              Insight AI
+              Tambah Transaksi
             </Link>
           </div>
         </div>
@@ -636,9 +673,11 @@ const Sidebar = () => {
       </div>
 
       <div className="mt-3 border-t border-slate-200 pt-3">
-        <div className="flex items-center gap-3 rounded-2xl bg-slate-50 p-2.5">
-          {renderAvatar("h-11 w-11")}
-          <div className="min-w-0">
+        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-2.5">
+          <div className="shrink-0">
+            {renderAvatar("h-11 w-11", "panel")}
+          </div>
+          <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-slate-800">{profileData?.name || "User"}</p>
             <p className="truncate text-xs text-slate-500">{profileData?.email || "-"}</p>
           </div>
@@ -656,7 +695,7 @@ const Sidebar = () => {
           <button
             type="button"
             onClick={handleLogout}
-            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
           >
             <FiLogOut className="h-3.5 w-3.5" />
             Keluar

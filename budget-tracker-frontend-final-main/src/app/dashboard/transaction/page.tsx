@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FaArrowDown,
   FaArrowLeft,
@@ -8,6 +8,8 @@ import {
   FaArrowUp,
   FaChartLine,
   FaEdit,
+  FaFileExcel,
+  FaFilePdf,
   FaPlus,
   FaReceipt,
   FaSearch,
@@ -29,6 +31,8 @@ import {
   fetchTransactionById,
 } from "@/services/transaction";
 import formatRupiah from "@/utils/formatRupiah";
+import { downloadTransactionExcel, downloadTransactionPdf } from "@/utils/transactionExport";
+import { emitTransactionSync } from "@/utils/transactionSync";
 import Modal from "@/ui/Modal";
 import MonthPicker from "@/ui/MonthPicker";
 import TransactionForm from "@/pages/TransactionForm";
@@ -63,6 +67,8 @@ const parseAmount = (amount: string | number): number => {
   } else {
     const dotParts = cleaned.split(".");
     if (dotParts.length > 2) {
+      cleaned = dotParts.join("");
+    } else if (dotParts.length === 2 && dotParts[1].length === 3) {
       cleaned = dotParts.join("");
     }
   }
@@ -107,6 +113,7 @@ const formatCompactCurrency = (value: number): string => {
 
 export default function TransactionPage() {
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [transaction, setTransaction] = useState<Transaction[]>([]);
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
@@ -124,16 +131,66 @@ export default function TransactionPage() {
   const [isFormLoading, setIsFormLoading] = useState(false);
   const [isFormSubmitting, setIsFormSubmitting] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthKey());
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [isIncomeTrendMinimized, setIsIncomeTrendMinimized] = useState(false);
+  const [isSyncPulseActive, setIsSyncPulseActive] = useState(false);
+
+  const syncPulseTimeoutRef = useRef<number | null>(null);
 
   const currentMonthKey = useMemo(() => getCurrentMonthKey(), []);
   const selectedMonthLabel = useMemo(() => formatMonthLabel(selectedMonth), [selectedMonth]);
 
+  const triggerSyncPulse = useCallback(() => {
+    if (typeof window === "undefined") return;
+
+    if (syncPulseTimeoutRef.current) {
+      window.clearTimeout(syncPulseTimeoutRef.current);
+    }
+
+    setIsSyncPulseActive(false);
+    window.requestAnimationFrame(() => {
+      setIsSyncPulseActive(true);
+      syncPulseTimeoutRef.current = window.setTimeout(() => {
+        setIsSyncPulseActive(false);
+      }, 1150);
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (typeof window === "undefined") return;
+      if (syncPulseTimeoutRef.current) {
+        window.clearTimeout(syncPulseTimeoutRef.current);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const timeout = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [search]);
+
   const loadTransaction = useCallback(async () => {
     setIsLoadingTable(true);
     try {
-      const res = await fetchTransaction(page, limit, search, selectedMonth);
-      setTransaction(res?.data || []);
-      setTotalPages(Math.max(res?.pagination?.totalPage || res?.pagination?.totalPages || 1, 1));
+      const res = await fetchTransaction(page, limit, debouncedSearch, selectedMonth);
+      const nextTotalPages = Math.max(res?.pagination?.totalPage || res?.pagination?.totalPages || 1, 1);
+
+      setTransaction(Array.isArray(res?.data) ? res.data : []);
+      setTotalPages(nextTotalPages);
+
+      if (page > nextTotalPages) {
+        setPage(nextTotalPages);
+      }
     } catch (error) {
       if (error instanceof Error) {
         console.error({ message: error.message, type: "danger" });
@@ -143,13 +200,14 @@ export default function TransactionPage() {
     } finally {
       setIsLoadingTable(false);
     }
-  }, [page, limit, search, selectedMonth]);
+  }, [page, limit, debouncedSearch, selectedMonth]);
 
   const loadFinancialOverview = useCallback(async () => {
     setIsLoadingOverview(true);
     try {
       const res = await fetchFinancialOverview(selectedMonth);
       setFinancialOverview(res?.data || null);
+      triggerSyncPulse();
     } catch (error) {
       if (error instanceof Error) {
         console.error({ message: error.message, type: "danger" });
@@ -159,7 +217,7 @@ export default function TransactionPage() {
     } finally {
       setIsLoadingOverview(false);
     }
-  }, [selectedMonth]);
+  }, [selectedMonth, triggerSyncPulse]);
 
   useEffect(() => {
     void loadTransaction();
@@ -266,8 +324,9 @@ export default function TransactionPage() {
       }
 
       closeFormPopup(true);
-      await loadTransaction();
-      await loadFinancialOverview();
+      await Promise.all([loadTransaction(), loadFinancialOverview()]);
+      emitTransactionSync("transaction-form-submit");
+      triggerSyncPulse();
     } catch (error) {
       if (error instanceof Error) {
         setModal({ type: "danger", title: "Gagal", message: error.message, okText: "Tutup", onOk: () => setModal(null) });
@@ -302,8 +361,9 @@ export default function TransactionPage() {
             okText: "Oke",
             onOk: () => setModal(null),
           });
-          await loadTransaction();
-          await loadFinancialOverview();
+          await Promise.all([loadTransaction(), loadFinancialOverview()]);
+          emitTransactionSync("transaction-delete");
+          triggerSyncPulse();
         } catch (error) {
           console.error(error);
           setModal({
@@ -317,6 +377,70 @@ export default function TransactionPage() {
       },
       onCancel: () => setModal(null),
     });
+  };
+
+  const fetchExportTransactions = useCallback(async (): Promise<Transaction[]> => {
+    const exportLimit = 50000;
+    const res = await fetchTransaction(1, exportLimit, debouncedSearch, selectedMonth);
+    return Array.isArray(res?.data) ? res.data : [];
+  }, [debouncedSearch, selectedMonth]);
+
+  const handleDownloadExcel = async () => {
+    setIsExportingExcel(true);
+    try {
+      const rows = await fetchExportTransactions();
+      if (rows.length === 0) {
+        setModal({
+          type: "danger",
+          title: "Data Kosong",
+          message: "Tidak ada transaksi yang bisa diekspor untuk filter saat ini.",
+          okText: "Tutup",
+          onOk: () => setModal(null),
+        });
+        return;
+      }
+
+      downloadTransactionExcel(rows, selectedMonthLabel);
+    } catch (error) {
+      setModal({
+        type: "danger",
+        title: "Ekspor Gagal",
+        message: error instanceof Error ? error.message : "Gagal membuat file Excel.",
+        okText: "Tutup",
+        onOk: () => setModal(null),
+      });
+    } finally {
+      setIsExportingExcel(false);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    setIsExportingPdf(true);
+    try {
+      const rows = await fetchExportTransactions();
+      if (rows.length === 0) {
+        setModal({
+          type: "danger",
+          title: "Data Kosong",
+          message: "Tidak ada transaksi yang bisa diekspor untuk filter saat ini.",
+          okText: "Tutup",
+          onOk: () => setModal(null),
+        });
+        return;
+      }
+
+      downloadTransactionPdf(rows, selectedMonthLabel);
+    } catch (error) {
+      setModal({
+        type: "danger",
+        title: "Ekspor Gagal",
+        message: error instanceof Error ? error.message : "Gagal membuat file PDF.",
+        okText: "Tutup",
+        onOk: () => setModal(null),
+      });
+    } finally {
+      setIsExportingPdf(false);
+    }
   };
 
   const handleSort = (field: SortField) => {
@@ -498,7 +622,11 @@ export default function TransactionPage() {
           </div>
         )}
 
-        <div className="h-full rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 p-4 shadow-sm xl:col-span-4">
+        <div
+          className={`h-full rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 p-4 shadow-sm xl:col-span-4 ${
+            isSyncPulseActive ? "pulse-soft" : ""
+          }`}
+        >
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-700">Akumulasi Saldo</p>
             <FaWallet className="h-4 w-4 text-indigo-600" />
@@ -524,7 +652,11 @@ export default function TransactionPage() {
           </div>
         </div>
 
-        <div className="h-full rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm xl:col-span-4">
+        <div
+          className={`h-full rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm xl:col-span-4 ${
+            isSyncPulseActive ? "pulse-soft" : ""
+          }`}
+        >
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-700">Ledger Bulanan (Debit/Kredit)</p>
             <FaChartLine className="h-4 w-4 text-amber-600" />
@@ -548,7 +680,11 @@ export default function TransactionPage() {
           </div>
         </div>
 
-        <div className="h-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-4">
+        <div
+          className={`h-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-4 ${
+            isSyncPulseActive ? "pulse-soft" : ""
+          }`}
+        >
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-700">Aktivitas Bulanan</p>
             <FaReceipt className="h-4 w-4 text-indigo-500" />
@@ -578,10 +714,23 @@ export default function TransactionPage() {
               <p className="text-sm font-semibold text-slate-700">Tren Pemasukan 6 Bulan</p>
               <p className="mt-1 text-xs text-slate-500">Grafik hanya pemasukan bulanan untuk bantu evaluasi pertumbuhan income.</p>
             </div>
-            <FaChartLine className="h-4 w-4 text-emerald-600" />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsIncomeTrendMinimized((prev) => !prev)}
+                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100"
+              >
+                {isIncomeTrendMinimized ? "Tampilkan" : "Minimize"}
+              </button>
+              <FaChartLine className="h-4 w-4 text-emerald-600" />
+            </div>
           </div>
 
-          {incomeTrend.length === 0 ? (
+          {isIncomeTrendMinimized ? (
+            <div className="mt-3 rounded-xl border border-dashed border-slate-200 px-4 py-5 text-center text-sm text-slate-500">
+              Tampilan tren pemasukan sedang diminimalkan.
+            </div>
+          ) : incomeTrend.length === 0 ? (
             <div className="mt-4 rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
               Belum ada data pemasukan untuk ditampilkan.
             </div>
@@ -650,6 +799,24 @@ export default function TransactionPage() {
                   Desc
                 </>
               )}
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadExcel}
+              disabled={isExportingExcel || isLoadingTable}
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <FaFileExcel className="h-3.5 w-3.5" />
+              {isExportingExcel ? "Menyiapkan..." : "Excel"}
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              disabled={isExportingPdf || isLoadingTable}
+              className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <FaFilePdf className="h-3.5 w-3.5" />
+              {isExportingPdf ? "Menyiapkan..." : "PDF"}
             </button>
           </div>
         </div>

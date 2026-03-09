@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   FaArrowDown,
@@ -22,6 +22,7 @@ import {
   buildFinancialAIGenerateRequestPayload,
   buildFinancialPayload,
 } from "@/utils/buildFinancialPayload";
+import { subscribeTransactionSync } from "@/utils/transactionSync";
 import {
   Area,
   Brush,
@@ -67,6 +68,8 @@ const parseAmount = (amount: string | number): number => {
   } else {
     const dotParts = cleaned.split(".");
     if (dotParts.length > 2) {
+      cleaned = dotParts.join("");
+    } else if (dotParts.length === 2 && dotParts[1].length === 3) {
       cleaned = dotParts.join("");
     }
   }
@@ -219,6 +222,10 @@ export default function DashboardPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [chartRange, setChartRange] = useState<BrushRange>({ startIndex: 0, endIndex: 0 });
   const [selectedMonth, setSelectedMonth] = useState("");
+  const [isSyncPulseActive, setIsSyncPulseActive] = useState(false);
+
+  const isMountedRef = useRef(true);
+  const syncPulseTimeoutRef = useRef<number | null>(null);
 
   const currentMonthKey = useMemo(() => getCurrentMonthKey(), []);
   const recentTransactions = useMemo(
@@ -226,8 +233,35 @@ export default function DashboardPage() {
     [monthlyTransactions]
   );
 
-  useEffect(() => {
-    const fetchData = async () => {
+  const triggerSyncPulse = useCallback(() => {
+    if (typeof window === "undefined") return;
+
+    if (syncPulseTimeoutRef.current) {
+      window.clearTimeout(syncPulseTimeoutRef.current);
+    }
+
+    setIsSyncPulseActive(false);
+    window.requestAnimationFrame(() => {
+      setIsSyncPulseActive(true);
+      syncPulseTimeoutRef.current = window.setTimeout(() => {
+        setIsSyncPulseActive(false);
+      }, 1100);
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      isMountedRef.current = false;
+      if (typeof window === "undefined") return;
+      if (syncPulseTimeoutRef.current) {
+        window.clearTimeout(syncPulseTimeoutRef.current);
+      }
+    },
+    []
+  );
+
+  const loadDashboardData = useCallback(
+    async (withSyncPulse = false) => {
       setLoading(true);
       setErrorMessage(null);
 
@@ -245,10 +279,16 @@ export default function DashboardPage() {
         const monthForTransactions = selectedMonth || fallbackMonth;
         const monthlyTransactionsRes = await fetchTransaction(1, 5000, "", monthForTransactions);
 
+        if (!isMountedRef.current) return;
+
         setChartData(Array.isArray(chartRes?.data) ? chartRes.data : []);
         setSummary(summaryData);
         setMonthlyTransactions(Array.isArray(monthlyTransactionsRes?.data) ? monthlyTransactionsRes.data : []);
         setUserName(profileResult?.data?.data?.name || "User");
+
+        if (withSyncPulse) {
+          triggerSyncPulse();
+        }
 
         if (profileResult?.error?.isUnauthorized) {
           logout();
@@ -256,18 +296,30 @@ export default function DashboardPage() {
           return;
         }
       } catch (error) {
+        if (!isMountedRef.current) return;
         if (error instanceof Error) {
           setErrorMessage(error.message);
         } else {
           setErrorMessage("Terjadi kesalahan saat memuat dashboard.");
         }
       } finally {
-        setLoading(false);
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
       }
-    };
+    },
+    [selectedMonth, triggerSyncPulse]
+  );
 
-    void fetchData();
-  }, [selectedMonth]);
+  useEffect(() => {
+    void loadDashboardData(false);
+  }, [loadDashboardData]);
+
+  useEffect(() => {
+    return subscribeTransactionSync(() => {
+      void loadDashboardData(true);
+    });
+  }, [loadDashboardData]);
 
   const dateNow = useMemo(
     () =>
@@ -593,7 +645,7 @@ export default function DashboardPage() {
       )}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <article className="rounded-2xl border border-indigo-100 bg-white p-4 shadow-sm">
+        <article className={`rounded-2xl border border-indigo-100 bg-white p-4 shadow-sm ${isSyncPulseActive ? "pulse-soft" : ""}`}>
           <div className="flex items-center justify-between">
             <p className="text-xs text-slate-500">Sisa Uang</p>
             <FaWallet className="h-4 w-4 text-indigo-600" />
@@ -603,7 +655,7 @@ export default function DashboardPage() {
           </p>
         </article>
 
-        <article className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
+        <article className={`rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm ${isSyncPulseActive ? "pulse-soft" : ""}`}>
           <div className="flex items-center justify-between">
             <p className="text-xs text-slate-500">Uang Masuk</p>
             <FaArrowUp className="h-4 w-4 text-emerald-600" />
@@ -611,7 +663,7 @@ export default function DashboardPage() {
           <p className="mt-2 text-xl font-bold text-emerald-600">{loading ? "..." : formatRupiah(income)}</p>
         </article>
 
-        <article className="rounded-2xl border border-rose-100 bg-white p-4 shadow-sm">
+        <article className={`rounded-2xl border border-rose-100 bg-white p-4 shadow-sm ${isSyncPulseActive ? "pulse-soft" : ""}`}>
           <div className="flex items-center justify-between">
             <p className="text-xs text-slate-500">Uang Keluar</p>
             <FaArrowDown className="h-4 w-4 text-rose-600" />
@@ -619,7 +671,7 @@ export default function DashboardPage() {
           <p className="mt-2 text-xl font-bold text-rose-600">{loading ? "..." : formatRupiah(expense)}</p>
         </article>
 
-        <article className="rounded-2xl border border-cyan-100 bg-white p-4 shadow-sm">
+        <article className={`rounded-2xl border border-cyan-100 bg-white p-4 shadow-sm ${isSyncPulseActive ? "pulse-soft" : ""}`}>
           <div className="flex items-center justify-between">
             <p className="text-xs text-slate-500">Tabungan</p>
             <FaPiggyBank className="h-4 w-4 text-cyan-600" />
@@ -627,7 +679,7 @@ export default function DashboardPage() {
           <p className="mt-2 text-xl font-bold text-cyan-600">{loading ? "..." : formatRupiah(saving)}</p>
         </article>
 
-        <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <article className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ${isSyncPulseActive ? "pulse-soft" : ""}`}>
           <div className="flex items-center justify-between">
             <p className="text-xs text-slate-500">Rasio Pengeluaran</p>
             <FaChartLine className="h-4 w-4 text-slate-600" />

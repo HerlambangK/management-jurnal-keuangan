@@ -8,6 +8,7 @@ import LoadingSpinnerScreen from "@/ui/LoadingSpinnerScreen";
 import { ModalProps } from "@/interfaces/IModal";
 import { TransactionFormData } from "@/interfaces/ITransaction";
 import { createTransaction } from "@/services/transaction";
+import { emitTransactionSync } from "@/utils/transactionSync";
 
 export default function CreateTransactionPage() {
     const router = useRouter();
@@ -21,6 +22,7 @@ export default function CreateTransactionPage() {
                 ...form,
                 category_id: form.categoryId    
             });
+            emitTransactionSync("create-transaction-page");
             setModal({
                 type: "success",
                 title: "Berhasil",

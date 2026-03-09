@@ -1,5 +1,6 @@
 import api from "@/api";
 import {
+    ClientLocationPayload,
     LoginData,
     LoginResponse,
     ProfileResponse,
@@ -11,6 +12,7 @@ import {
 } from "@/interfaces/IAuth";
 import getTokenHeader from "@/utils/getTokenHeader";
 import { ApiServiceError, handleApiError, toApiServiceError } from "@/utils/handleApiError";
+import { buildClientLocationHeaders } from "@/utils/clientLocation";
 
 export const login = async (userDataLogin: LoginData): Promise<LoginResponse> => {
     try {
@@ -30,10 +32,16 @@ export const register = async (userDataRegist: RegisterData): Promise<RegisterRe
     }
 };
 
-export const profile = async (token: string): Promise<ProfileResponse> => {
+export const profile = async (
+    token: string,
+    clientLocation?: ClientLocationPayload | null
+): Promise<ProfileResponse> => {
     try {
         const response = await api.get("/auth/profile", {
-            headers: { Authorization: `Bearer ${token}` }
+            headers: {
+                Authorization: `Bearer ${token}`,
+                ...buildClientLocationHeaders(clientLocation),
+            }
         });
         return response.data;
     } catch (error) {
@@ -42,10 +50,11 @@ export const profile = async (token: string): Promise<ProfileResponse> => {
 };
 
 export const profileSafe = async (
-    token: string
+    token: string,
+    clientLocation?: ClientLocationPayload | null
 ): Promise<{ data: ProfileResponse | null; error: ApiServiceError | null }> => {
     try {
-        const data = await profile(token);
+        const data = await profile(token, clientLocation);
         return { data, error: null };
     } catch (error) {
         return { data: null, error: toApiServiceError(error, "Get Profile Failed") };
@@ -63,10 +72,16 @@ export const updateProfile = async (payload: UpdateProfilePayload): Promise<Prof
     }
 };
 
-export const fetchLoginSessions = async (limit = 3): Promise<SessionListResponse> => {
+export const fetchLoginSessions = async (
+    limit = 3,
+    clientLocation?: ClientLocationPayload | null
+): Promise<SessionListResponse> => {
     try {
         const response = await api.get("/auth/sessions", {
-            headers: getTokenHeader(),
+            headers: {
+                ...getTokenHeader(),
+                ...buildClientLocationHeaders(clientLocation),
+            },
             params: { limit },
         });
         return response.data;

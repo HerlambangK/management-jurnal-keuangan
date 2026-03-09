@@ -14,6 +14,8 @@ class AuthService {
         this.SALT_ROUNDS = 10;
         this.MAX_AVATAR_SIZE_BYTES = 2 * 1024 * 1024;
         this.MAX_LOGIN_HISTORY = 3;
+        this.IP_LOOKUP_TIMEOUT_MS = 1500;
+        this.REVERSE_GEOCODE_TIMEOUT_MS = 2200;
     }
 
     sanitizeUser(user) {
@@ -22,7 +24,7 @@ class AuthService {
         return userJson;
     }
 
-    async register({name, email, password, number}, context = {}) {
+    async register({name, email, password, number, client_location}, context = {}) {
         const existingUser = await User.findOne({where: { email }});
         
         if(existingUser) {
@@ -31,7 +33,15 @@ class AuthService {
 
         const hash = await bcrypt.hash(password, this.SALT_ROUNDS);
         const newUser = await User.create({name, email, password: hash, number});
-        const sessionId = await this.trackLoginSession(newUser.id, context.req);
+        const preciseClientLocation = this.requirePreciseClientLocation(
+            context.req,
+            client_location
+        );
+        const sessionId = await this.trackLoginSession(
+            newUser.id,
+            context.req,
+            preciseClientLocation
+        );
         const tokenPayload = { id: newUser.id, email: newUser.email };
         if (Number.isInteger(Number(sessionId)) && Number(sessionId) > 0) {
             tokenPayload.sid = Number(sessionId);
@@ -41,14 +51,22 @@ class AuthService {
         return { user: this.sanitizeUser(newUser), token }
     }
 
-    async login({email, password}, context = {}) {
+    async login({email, password, client_location}, context = {}) {
         const user = await User.findOne({where: {email}});
         if(!user) throw new NotFound("Email Tidak Ditemukan");
 
         const isValid = await bcrypt.compare(password, user.password);
         if(!isValid) throw new BadRequestError("Password nya salah boy");
 
-        const sessionId = await this.trackLoginSession(user.id, context.req);
+        const preciseClientLocation = this.requirePreciseClientLocation(
+            context.req,
+            client_location
+        );
+        const sessionId = await this.trackLoginSession(
+            user.id,
+            context.req,
+            preciseClientLocation
+        );
         const tokenPayload = { id: user.id, email: user.email };
         if (Number.isInteger(Number(sessionId)) && Number(sessionId) > 0) {
             tokenPayload.sid = Number(sessionId);
@@ -65,6 +83,8 @@ class AuthService {
         if (!user) {
             throw new NotFound('User tidak ditemukan');
         }
+
+        await this.refreshCurrentSessionLocation(userId, context);
 
         const sessions = await this.getLoginSessions(
             userId,
@@ -139,6 +159,7 @@ class AuthService {
     }
 
     async sessions(userId, limit = this.MAX_LOGIN_HISTORY, context = {}) {
+        await this.refreshCurrentSessionLocation(userId, context);
         return await this.getLoginSessions(userId, limit, context);
     }
 
@@ -207,6 +228,11 @@ class AuthService {
                     'ip_address',
                     'device',
                     'location',
+                    'latitude',
+                    'longitude',
+                    'location_accuracy_m',
+                    'location_source',
+                    'location_captured_at',
                     'user_agent',
                     'logged_in_at',
                 ],
@@ -214,13 +240,24 @@ class AuthService {
                 limit: safeLimit,
             });
 
-            const normalizedSessions = rawSessions.map((session) => {
+            const ipLocationCache = new Map();
+            const normalizedSessions = await Promise.all(rawSessions.map(async (session) => {
                 const base = session?.toJSON ? session.toJSON() : { ...(session || {}) };
+                const chromeLocation = this.extractChromeLocationLabel(base.location);
+                const ipLocation = await this.resolveSessionIpLocationLabel(
+                    base.ip_address,
+                    ipLocationCache
+                );
                 return {
                     ...base,
-                    location: this.formatLocationLabel(base.location, base.ip_address),
+                    latitude: this.toFiniteNumber(base.latitude),
+                    longitude: this.toFiniteNumber(base.longitude),
+                    location_accuracy_m: this.toFiniteNumber(base.location_accuracy_m),
+                    location_chrome: chromeLocation,
+                    location_ip: ipLocation,
+                    location: chromeLocation || ipLocation,
                 };
-            });
+            }));
             const currentSessionIndex = this.resolveCurrentSessionIndex(
                 normalizedSessions,
                 context
@@ -238,6 +275,51 @@ class AuthService {
         }
     }
 
+    extractChromeLocationLabel(location) {
+        const rawLocation = String(location || '').trim();
+        if (!rawLocation || /^tidak diketahui$/i.test(rawLocation)) {
+            return '';
+        }
+
+        if (/(berdasarkan lokasi perangkat)/i.test(rawLocation)) {
+            return rawLocation;
+        }
+
+        return '';
+    }
+
+    formatIpLocationLabel(rawLocation, ipAddress) {
+        const location = String(rawLocation || '').trim();
+        const ip = String(ipAddress || '').trim();
+        if (!location || /^tidak diketahui$/i.test(location)) {
+            return ip && ip !== 'unknown'
+                ? `Tidak diketahui (berdasarkan IP ${ip})`
+                : 'Tidak diketahui (IP publik tidak tersedia)';
+        }
+
+        if (/^local network$/i.test(location)) {
+            return ip && ip !== 'unknown'
+                ? `Jaringan Lokal (IP privat ${ip})`
+                : 'Jaringan Lokal (IP privat/localhost)';
+        }
+
+        return /(berdasarkan IP)/i.test(location)
+            ? location
+            : `${location} (berdasarkan IP${ip && ip !== 'unknown' ? ` ${ip}` : ''})`;
+    }
+
+    async resolveSessionIpLocationLabel(ipAddress, cache = new Map()) {
+        const cacheKey = String(ipAddress || 'unknown').trim() || 'unknown';
+        if (cache.has(cacheKey)) {
+            return cache.get(cacheKey);
+        }
+
+        const resolved = await this.resolveLocationFromIp(cacheKey);
+        const label = this.formatIpLocationLabel(resolved, cacheKey);
+        cache.set(cacheKey, label);
+        return label;
+    }
+
     formatLocationLabel(location, ipAddress) {
         const rawLocation = String(location || '').trim();
         const ip = String(ipAddress || '').trim();
@@ -251,6 +333,10 @@ class AuthService {
             return ip && ip !== 'unknown'
                 ? `Jaringan Lokal (IP privat ${ip})`
                 : 'Jaringan Lokal (IP privat/localhost)';
+        }
+
+        if (/(berdasarkan lokasi perangkat)/i.test(rawLocation)) {
+            return rawLocation;
         }
 
         return /(berdasarkan IP)/i.test(rawLocation)
@@ -312,6 +398,253 @@ class AuthService {
         return ip || 'unknown';
     }
 
+    extractHeaderValue(req, headerName) {
+        const raw = req?.headers?.[headerName];
+        if (Array.isArray(raw)) {
+            return String(raw[0] || '').trim();
+        }
+        return String(raw || '').trim();
+    }
+
+    toFiniteNumber(value) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    pickFirstNonEmpty(values = []) {
+        for (const value of values) {
+            const normalized = this.sanitizeLocationToken(value);
+            if (normalized) return normalized;
+        }
+        return '';
+    }
+
+    sanitizeLocationToken(value, maxLength = 120) {
+        const normalized = String(value || '').trim();
+        if (!normalized) return '';
+        return normalized.slice(0, maxLength);
+    }
+
+    normalizeClientLocation(rawInput) {
+        if (!rawInput || typeof rawInput !== 'object') {
+            return null;
+        }
+
+        const latitude = this.toFiniteNumber(rawInput.latitude);
+        const longitude = this.toFiniteNumber(rawInput.longitude);
+        if (latitude === null || longitude === null) {
+            return null;
+        }
+
+        if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+            return null;
+        }
+
+        const accuracy = this.toFiniteNumber(rawInput.accuracy);
+        const source = this.sanitizeLocationToken(rawInput.source, 40) || 'browser_geolocation';
+        const capturedAt = this.sanitizeLocationToken(rawInput.captured_at, 60);
+        const timezone = this.sanitizeLocationToken(rawInput.timezone, 60);
+
+        return {
+            latitude,
+            longitude,
+            accuracy: accuracy !== null && accuracy >= 0 ? accuracy : null,
+            source,
+            captured_at: capturedAt || null,
+            timezone: timezone || null,
+            village: this.sanitizeLocationToken(rawInput.village),
+            district: this.sanitizeLocationToken(rawInput.district),
+            province: this.sanitizeLocationToken(rawInput.province),
+        };
+    }
+
+    extractClientLocation(req, rawLocationInput = null) {
+        const normalizedFromBody = this.normalizeClientLocation(
+            rawLocationInput || req?.body?.client_location
+        );
+        if (normalizedFromBody) {
+            return normalizedFromBody;
+        }
+
+        const latitude = this.toFiniteNumber(this.extractHeaderValue(req, 'x-client-latitude'));
+        const longitude = this.toFiniteNumber(this.extractHeaderValue(req, 'x-client-longitude'));
+        if (latitude === null || longitude === null) {
+            return null;
+        }
+
+        const accuracy = this.toFiniteNumber(this.extractHeaderValue(req, 'x-client-accuracy'));
+        const source = this.extractHeaderValue(req, 'x-client-location-source');
+        const capturedAt = this.extractHeaderValue(req, 'x-client-location-captured-at');
+        const timezone = this.extractHeaderValue(req, 'x-client-timezone');
+
+        return this.normalizeClientLocation({
+            latitude,
+            longitude,
+            accuracy,
+            source: source || 'browser_geolocation',
+            captured_at: capturedAt || null,
+            timezone: timezone || null,
+        });
+    }
+
+    toValidDateOrNull(value) {
+        if (!value) return null;
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    requirePreciseClientLocation(req, rawLocationInput = null) {
+        const preciseLocation = this.extractClientLocation(req, rawLocationInput);
+        if (!preciseLocation) {
+            throw new BadRequestError(
+                'Akses lokasi presisi wajib aktif. Izinkan GPS browser agar latitude dan longitude terkirim.'
+            );
+        }
+        return preciseLocation;
+    }
+
+    buildSessionLocationPayload(clientLocation = null) {
+        if (!clientLocation) {
+            return {};
+        }
+
+        return {
+            latitude: clientLocation.latitude,
+            longitude: clientLocation.longitude,
+            location_accuracy_m: clientLocation.accuracy,
+            location_source: clientLocation.source || 'browser_geolocation',
+            location_captured_at:
+                this.toValidDateOrNull(clientLocation.captured_at) || new Date(),
+        };
+    }
+
+    hasSessionFieldDifference(currentSession, updatePayload = {}) {
+        const entries = Object.entries(updatePayload);
+        for (const [key, nextValue] of entries) {
+            if (nextValue === undefined) continue;
+            const currentValue = currentSession?.get
+                ? currentSession.get(key)
+                : currentSession?.[key];
+
+            if (nextValue instanceof Date) {
+                const currentEpoch = this.toValidDateOrNull(currentValue)?.getTime() || 0;
+                if (currentEpoch !== nextValue.getTime()) {
+                    return true;
+                }
+                continue;
+            }
+
+            if (String(currentValue ?? '') !== String(nextValue ?? '')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    buildDeviceLocationLabel({ village, district, province }) {
+        const locationParts = [];
+        if (village) locationParts.push(`Desa/Kel. ${village}`);
+        if (district) locationParts.push(`Kec. ${district}`);
+        if (province) locationParts.push(`Prov. ${province}`);
+
+        if (locationParts.length === 0) {
+            return '';
+        }
+
+        return `${locationParts.join(', ')} (berdasarkan lokasi perangkat)`;
+    }
+
+    buildDeviceLocationFromAddress(address = {}) {
+        const village = this.pickFirstNonEmpty([
+            address.village,
+            address.hamlet,
+            address.suburb,
+            address.neighbourhood,
+            address.quarter,
+            address.residential,
+        ]);
+        const district = this.pickFirstNonEmpty([
+            address.city_district,
+            address.subdistrict,
+            address.county,
+            address.municipality,
+            address.regency,
+            address.city,
+            address.town,
+        ]);
+        const province = this.pickFirstNonEmpty([
+            address.state,
+            address.province,
+            address.region,
+        ]);
+
+        const detailedLabel = this.buildDeviceLocationLabel({
+            village,
+            district,
+            province,
+        });
+        if (detailedLabel) {
+            return detailedLabel;
+        }
+
+        const coarseLabel = [
+            this.pickFirstNonEmpty([address.city, address.town, address.county]),
+            province,
+            this.pickFirstNonEmpty([address.country]),
+        ]
+            .filter(Boolean)
+            .join(', ');
+
+        return coarseLabel
+            ? `${coarseLabel} (berdasarkan lokasi perangkat)`
+            : '';
+    }
+
+    async resolveLocationFromDevice(clientLocation) {
+        if (!clientLocation) {
+            return '';
+        }
+
+        const fromPayload = this.buildDeviceLocationLabel({
+            village: this.sanitizeLocationToken(clientLocation.village),
+            district: this.sanitizeLocationToken(clientLocation.district),
+            province: this.sanitizeLocationToken(clientLocation.province),
+        });
+        if (fromPayload) {
+            return fromPayload;
+        }
+
+        try {
+            const response = await axios.get('https://nominatim.openstreetmap.org/reverse', {
+                timeout: this.REVERSE_GEOCODE_TIMEOUT_MS,
+                params: {
+                    format: 'jsonv2',
+                    addressdetails: 1,
+                    lat: clientLocation.latitude,
+                    lon: clientLocation.longitude,
+                    'accept-language': 'id,en',
+                },
+                headers: {
+                    'User-Agent': 'budget-tracker-backend/1.0 (reverse-geocode)',
+                    Accept: 'application/json',
+                },
+            });
+
+            const data = response?.data || {};
+            const locationByAddress = this.buildDeviceLocationFromAddress(data.address || {});
+            if (locationByAddress) {
+                return locationByAddress;
+            }
+
+            const displayName = this.sanitizeLocationToken(data.display_name, 180);
+            return displayName
+                ? `${displayName} (berdasarkan lokasi perangkat)`
+                : '';
+        } catch (_error) {
+            return '';
+        }
+    }
+
     extractDeviceInfo(userAgentRaw) {
         const userAgent = String(userAgentRaw || '').toLowerCase();
         const isMobile = /mobile|iphone|android|ipad/.test(userAgent);
@@ -354,7 +687,7 @@ class AuthService {
 
         try {
             const response = await axios.get(`https://ipapi.co/${ip}/json/`, {
-                timeout: 1500,
+                timeout: this.IP_LOOKUP_TIMEOUT_MS,
             });
             const data = response?.data || {};
             const city = data.city || '';
@@ -367,20 +700,116 @@ class AuthService {
         }
     }
 
-    async trackLoginSession(userId, req) {
+    async resolveLocationForSession(ipAddress, clientLocation) {
+        const deviceLocation = await this.resolveLocationFromDevice(clientLocation);
+        if (deviceLocation) {
+            return deviceLocation;
+        }
+        return await this.resolveLocationFromIp(ipAddress);
+    }
+
+    async findCurrentSessionRecord(userId, context = {}) {
+        const currentSessionIdRaw =
+            context?.currentSessionId ?? context?.auth?.sid;
+        const currentSessionId = Number(currentSessionIdRaw);
+        if (Number.isInteger(currentSessionId) && currentSessionId > 0) {
+            return await LoginSession.findOne({
+                where: {
+                    id: currentSessionId,
+                    user_id: userId,
+                },
+            });
+        }
+
+        const req = context?.req;
+        if (!req) {
+            return null;
+        }
+
+        const ipAddress = this.extractClientIp(req);
+        const userAgent = String(req?.headers?.['user-agent'] || '').trim();
+        if ((!ipAddress || ipAddress === 'unknown') && !userAgent) {
+            return null;
+        }
+
+        const whereClause = {
+            user_id: userId,
+        };
+
+        if (ipAddress && ipAddress !== 'unknown') {
+            whereClause.ip_address = ipAddress;
+        }
+        if (userAgent) {
+            whereClause.user_agent = userAgent;
+        }
+
+        return await LoginSession.findOne({
+            where: whereClause,
+            order: [
+                ['logged_in_at', 'DESC'],
+                ['id', 'DESC'],
+            ],
+        });
+    }
+
+    async refreshCurrentSessionLocation(userId, context = {}) {
+        const req = context?.req;
+        if (!req || !userId) return;
+
+        const clientLocation = this.extractClientLocation(req);
+        if (!clientLocation) return;
+
+        try {
+            const currentSession = await this.findCurrentSessionRecord(userId, context);
+            if (!currentSession) return;
+
+            const ipAddress = this.extractClientIp(req);
+            const resolvedLocation = await this.resolveLocationForSession(
+                ipAddress,
+                clientLocation
+            );
+            const updatePayload = {
+                ...this.buildSessionLocationPayload(clientLocation),
+                ...(resolvedLocation ? { location: resolvedLocation } : {}),
+            };
+            if (
+                Object.keys(updatePayload).length === 0 ||
+                !this.hasSessionFieldDifference(currentSession, updatePayload)
+            ) {
+                return;
+            }
+
+            await currentSession.update(updatePayload);
+        } catch (error) {
+            if (process.env.NODE_ENV !== 'production') {
+                console.error(
+                    '[Auth] failed to refresh current session location',
+                    error?.message || error
+                );
+            }
+        }
+    }
+
+    async trackLoginSession(userId, req, rawClientLocation = null) {
         if (!req || !userId) return null;
 
         try {
             const ipAddress = this.extractClientIp(req);
             const userAgent = String(req?.headers?.['user-agent'] || 'Unknown');
             const device = this.extractDeviceInfo(userAgent);
-            const location = await this.resolveLocationFromIp(ipAddress);
+            const clientLocation = this.extractClientLocation(req, rawClientLocation);
+            const location = await this.resolveLocationForSession(
+                ipAddress,
+                clientLocation
+            );
+            const precisePayload = this.buildSessionLocationPayload(clientLocation);
 
             const loginSession = await LoginSession.create({
                 user_id: userId,
                 ip_address: ipAddress,
                 device,
                 location,
+                ...precisePayload,
                 user_agent: userAgent,
                 logged_in_at: new Date(),
             });

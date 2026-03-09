@@ -4,7 +4,16 @@ const helmet = require('helmet');
 const corsOptions = {
   origin: process.env.CORS_ORIGIN || '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Client-Latitude',
+    'X-Client-Longitude',
+    'X-Client-Accuracy',
+    'X-Client-Location-Source',
+    'X-Client-Location-Captured-At',
+    'X-Client-Timezone',
+  ],
 };
 
 const enableCORS = cors(corsOptions);

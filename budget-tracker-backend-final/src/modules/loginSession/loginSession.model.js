@@ -1,3 +1,5 @@
+const { buildShortUuid } = require('../../utils/shortUuid');
+
 module.exports = (sequelize, DataTypes) => {
     const LoginSession = sequelize.define(
         'LoginSession',
@@ -6,6 +8,11 @@ module.exports = (sequelize, DataTypes) => {
                 type: DataTypes.INTEGER,
                 primaryKey: true,
                 autoIncrement: true,
+            },
+            uuid: {
+                type: DataTypes.STRING(6),
+                allowNull: false,
+                unique: true,
             },
             user_id: {
                 type: DataTypes.INTEGER,
@@ -21,6 +28,26 @@ module.exports = (sequelize, DataTypes) => {
             },
             location: {
                 type: DataTypes.STRING(180),
+                allowNull: true,
+            },
+            latitude: {
+                type: DataTypes.DECIMAL(10, 7),
+                allowNull: true,
+            },
+            longitude: {
+                type: DataTypes.DECIMAL(10, 7),
+                allowNull: true,
+            },
+            location_accuracy_m: {
+                type: DataTypes.DECIMAL(10, 2),
+                allowNull: true,
+            },
+            location_source: {
+                type: DataTypes.STRING(40),
+                allowNull: true,
+            },
+            location_captured_at: {
+                type: DataTypes.DATE,
                 allowNull: true,
             },
             user_agent: {
@@ -49,6 +76,13 @@ module.exports = (sequelize, DataTypes) => {
             tableName: 'login_sessions',
             timestamps: false,
             underscored: true,
+            hooks: {
+                beforeValidate: (session) => {
+                    if (!session.uuid) {
+                        session.uuid = buildShortUuid();
+                    }
+                },
+            },
         }
     );
 

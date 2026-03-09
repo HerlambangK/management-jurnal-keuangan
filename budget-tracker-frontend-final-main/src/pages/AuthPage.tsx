@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { login, register } from "@/services/auth";
 import LoadingSpinnerButton from "@/ui/LoadingSpinnerButton";
 import Modal from "@/ui/Modal";
+import { resolveClientLocation } from "@/utils/clientLocation";
 
 const AuthPage = () => {
     const [type, setType] = useState<"login" | "register">("login");
@@ -41,9 +42,19 @@ const AuthPage = () => {
             let response;
 
             if(isLogin) {
+                const clientLocation = await resolveClientLocation({
+                    timeoutMs: 3200,
+                    enableHighAccuracy: true,
+                });
+                if (!clientLocation) {
+                    throw new Error(
+                        "Akses lokasi wajib diaktifkan untuk login. Izinkan lokasi browser lalu coba lagi."
+                    );
+                }
                 response = await login({
                     email: formData.email,
-                    password: formData.password
+                    password: formData.password,
+                    client_location: clientLocation,
                 });
             } else {
                 if(!termsCheckBoxRef.current?.checked) {
@@ -51,9 +62,19 @@ const AuthPage = () => {
                     return
                 }
 
+                const clientLocation = await resolveClientLocation({
+                    timeoutMs: 3200,
+                    enableHighAccuracy: true,
+                });
+                if (!clientLocation) {
+                    throw new Error(
+                        "Akses lokasi wajib diaktifkan untuk registrasi. Izinkan lokasi browser lalu coba lagi."
+                    );
+                }
                 response = await register({
                     ...formData,
-                    number: `+62${formData.number}`
+                    number: `+62${formData.number}`,
+                    client_location: clientLocation,
                 });
             }
 
