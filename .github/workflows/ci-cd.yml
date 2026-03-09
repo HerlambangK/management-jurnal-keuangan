@@ -99,6 +99,22 @@ jobs:
             exit 1
           fi
 
+      - name: Validate SSH key format
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          tmp_key="$(mktemp)"
+          printf '%s\n' "${VPS_SSH_KEY}" > "${tmp_key}"
+          chmod 600 "${tmp_key}"
+
+          if ! ssh-keygen -y -f "${tmp_key}" >/dev/null 2>&1; then
+            echo "::error::VPS_SSH_KEY is invalid. Paste only private key content from BEGIN to END, without quotes or KEY=VALUE prefix."
+            rm -f "${tmp_key}"
+            exit 1
+          fi
+
+          rm -f "${tmp_key}"
+
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
