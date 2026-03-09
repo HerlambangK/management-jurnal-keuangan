@@ -46,6 +46,25 @@ wait_backend_api_ok() {
   return 1
 }
 
+wait_mysql_ready() {
+  local max_attempts="${1:-40}"
+  local sleep_seconds="${2:-3}"
+
+  for attempt in $(seq 1 "${max_attempts}"); do
+    if docker compose exec -T mysql sh -lc 'mysqladmin ping -h127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent' >/dev/null 2>&1; then
+      echo "[deploy] mysql ready (attempt ${attempt}/${max_attempts})"
+      return 0
+    fi
+
+    echo "[deploy] waiting mysql readiness (attempt ${attempt}/${max_attempts})"
+    sleep "${sleep_seconds}"
+  done
+
+  echo "[deploy] mysql is not ready after ${max_attempts} attempts"
+  docker compose logs --tail=120 mysql || true
+  return 1
+}
+
 if [[ -f "${ROOT_DIR}/.env" ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -67,10 +86,11 @@ fi
 
 echo "[deploy] start mysql"
 docker compose up -d mysql
+wait_mysql_ready 40 3
 
 echo "[deploy] ensure database exists"
-docker compose exec -T mysql sh -lc "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"CREATE DATABASE IF NOT EXISTS \\\`\$MYSQL_DATABASE\\\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\""
-docker compose exec -T mysql sh -lc "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"SHOW DATABASES LIKE '\$MYSQL_DATABASE';\""
+docker compose exec -T mysql sh -lc "mysql -h127.0.0.1 -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"CREATE DATABASE IF NOT EXISTS \\\`\$MYSQL_DATABASE\\\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\""
+docker compose exec -T mysql sh -lc "mysql -h127.0.0.1 -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"SHOW DATABASES LIKE '\$MYSQL_DATABASE';\""
 
 echo "[deploy] run db migration"
 docker compose --profile tools run --rm migrator

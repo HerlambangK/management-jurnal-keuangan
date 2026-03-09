@@ -49,6 +49,25 @@ upsert_env() {
   fi
 }
 
+wait_mysql_ready() {
+  local max_attempts="${1:-40}"
+  local sleep_seconds="${2:-3}"
+
+  for attempt in $(seq 1 "${max_attempts}"); do
+    if docker compose exec -T mysql sh -lc 'mysqladmin ping -h127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent' >/dev/null 2>&1; then
+      echo "[mysql] ready (attempt ${attempt}/${max_attempts})"
+      return 0
+    fi
+
+    echo "[mysql] waiting service readiness (attempt ${attempt}/${max_attempts})"
+    sleep "${sleep_seconds}"
+  done
+
+  echo "[mysql] service is not ready after ${max_attempts} attempts"
+  docker compose logs --tail=120 mysql || true
+  return 1
+}
+
 ensure_root_env() {
   if [[ ! -f "${ROOT_ENV_FILE}" ]]; then
     if [[ -f "${APP_DIR}/.env.example" ]]; then
@@ -365,10 +384,11 @@ write_nginx_config_http_bootstrap
 echo "[8/12] Start MySQL dan tunggu healthy"
 docker compose up -d mysql
 docker compose ps mysql
+wait_mysql_ready 40 3
 
 echo "[8b/12] Pastikan database tersedia"
-docker compose exec -T mysql sh -lc "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"CREATE DATABASE IF NOT EXISTS \\\`\$MYSQL_DATABASE\\\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\""
-docker compose exec -T mysql sh -lc "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"SHOW DATABASES LIKE '\$MYSQL_DATABASE';\""
+docker compose exec -T mysql sh -lc "mysql -h127.0.0.1 -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"CREATE DATABASE IF NOT EXISTS \\\`\$MYSQL_DATABASE\\\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\""
+docker compose exec -T mysql sh -lc "mysql -h127.0.0.1 -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"SHOW DATABASES LIKE '\$MYSQL_DATABASE';\""
 
 echo "[9/12] Jalankan migrasi database"
 docker compose --profile tools run --rm migrator
@@ -435,5 +455,5 @@ echo "1) docker compose ps"
 echo "2) docker compose logs --tail=80 mysql backend nginx"
 echo "3) curl -I https://${DOMAIN}"
 echo "4) curl -I https://${DOMAIN}/api/v1/auth/profile"
-echo "5) docker compose exec -T mysql sh -lc 'mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"SHOW DATABASES LIKE '\''\$MYSQL_DATABASE'\'';\"'"
+echo "5) docker compose exec -T mysql sh -lc 'mysql -h127.0.0.1 -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"SHOW DATABASES LIKE '\''\$MYSQL_DATABASE'\'';\"'"
 echo "6) docker compose --profile tools run --rm migrator npm run migrate:status"
