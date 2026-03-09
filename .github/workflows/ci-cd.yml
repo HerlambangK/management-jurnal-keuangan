@@ -77,9 +77,11 @@ jobs:
           EOF
           )
 
-          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          if ! curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=${MESSAGE}"
+            --data-urlencode "text=${MESSAGE}"; then
+            echo "::warning::Failed to send Telegram start notification. Check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID."
+          fi
 
       - name: Validate deploy secrets
         env:
@@ -167,9 +169,11 @@ jobs:
           EOF
           )
 
-          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          if ! curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=${MESSAGE}"
+            --data-urlencode "text=${MESSAGE}"; then
+            echo "::warning::Failed to send Telegram success notification. Check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID."
+          fi
 
       - name: Notify Telegram (deploy failed)
         if: ${{ failure() }}
@@ -191,6 +195,8 @@ jobs:
           EOF
           )
 
-          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          if ! curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=${MESSAGE}"
+            --data-urlencode "text=${MESSAGE}"; then
+            echo "::warning::Failed to send Telegram failure notification. Check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID."
+          fi
