@@ -122,6 +122,9 @@ jobs:
 
             cd "${APP_DIR}"
             git config --global --add safe.directory "${APP_DIR}"
+            if [ -n "$(git status --porcelain)" ]; then
+              git stash push --include-untracked --message "ci-cd-auto-stash-${GITHUB_RUN_ID}" || true
+            fi
             git fetch origin main
             git checkout main
             git pull --ff-only origin main
