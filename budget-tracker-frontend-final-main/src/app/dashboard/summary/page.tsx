@@ -211,10 +211,10 @@ export default function SummaryPage() {
         }
     }, [selectedMonth]);
 
-    const loadForecastFromBackend = useCallback(async () => {
+    const loadForecastFromBackend = useCallback(async (useAi = false) => {
         setForecastLoading(true);
         try {
-            const result = await fetchMonthlySummaryForecast(true);
+            const result = await fetchMonthlySummaryForecast(useAi);
             if (result?.success && result.data) {
                 setForecast(result.data as MonthlySummaryForecast);
             } else {
@@ -254,7 +254,7 @@ export default function SummaryPage() {
 
                 await Promise.all([
                     loadLatestSummaryFromBackend(),
-                    loadForecastFromBackend(),
+                    loadForecastFromBackend(false),
                 ]);
             } catch {
                 if (cancelled) return;
@@ -330,7 +330,7 @@ export default function SummaryPage() {
                 } else {
                     setSelectedMonthHasTransactions(true);
                     await loadLatestSummaryFromBackend();
-                    void loadForecastFromBackend();
+                    void loadForecastFromBackend(false);
                 }
             } else {
                 throw new Error(result.message || "Gagal menghasilkan Ringkasan")

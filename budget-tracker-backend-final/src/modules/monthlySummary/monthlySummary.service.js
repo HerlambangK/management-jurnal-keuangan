@@ -12,6 +12,7 @@ class MonthlySummaryService {
         this.aiErrorLogCache = new Set();
         this.modelBlockUntilByName = new Map();
         this.aiResponseCacheByKey = new Map();
+        this.inFlightInsightByKey = new Map();
         this.aiCacheTtlMs = this.resolveAiCacheTtlMs();
         this.lastAiFailure = null;
     }
@@ -642,6 +643,26 @@ class MonthlySummaryService {
         });
     }
 
+    async getOrCreateInFlightInsightRequest(lockKey, createRequest) {
+        if (!lockKey || typeof createRequest !== 'function') {
+            return createRequest();
+        }
+
+        const existingPromise = this.inFlightInsightByKey.get(lockKey);
+        if (existingPromise) {
+            return existingPromise;
+        }
+
+        const requestPromise = Promise.resolve()
+            .then(() => createRequest())
+            .finally(() => {
+                this.inFlightInsightByKey.delete(lockKey);
+            });
+
+        this.inFlightInsightByKey.set(lockKey, requestPromise);
+        return requestPromise;
+    }
+
     buildForecastAiCacheKey(userId, historyPoints) {
         if (!Array.isArray(historyPoints) || historyPoints.length === 0) return null;
 
@@ -807,7 +828,7 @@ class MonthlySummaryService {
         const rpmLimit = this.parseRpmLimitFromMessage(message);
         const estimatedCooldownMs = rpmLimit
             ? Math.ceil((60_000 / rpmLimit) * 1.2)
-            : 12_000;
+            : 35_000;
 
         return Math.max(retryAfterMs || estimatedCooldownMs, 5_000);
     }
@@ -913,7 +934,7 @@ class MonthlySummaryService {
             return null;
         }
 
-        const maxAttempts = 3;
+        const maxAttempts = 4;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
             try {
@@ -1272,13 +1293,23 @@ class MonthlySummaryService {
         );
         let llmResponse = this.getCacheEntry(insightCacheKey);
         if (!llmResponse) {
-            llmResponse = await this.requestInsightFromLLM(
-                monthlyStats,
-                frontendFinancialData
+            const insightLockKey = `insight:${userId}:${monthlyStats.reference_month || '-'}`;
+            llmResponse = await this.getOrCreateInFlightInsightRequest(
+                insightLockKey,
+                async () => {
+                    const cached = this.getCacheEntry(insightCacheKey);
+                    if (cached) return cached;
+
+                    const generated = await this.requestInsightFromLLM(
+                        monthlyStats,
+                        frontendFinancialData
+                    );
+                    if (generated) {
+                        this.setCacheEntry(insightCacheKey, generated);
+                    }
+                    return generated;
+                }
             );
-            if (llmResponse) {
-                this.setCacheEntry(insightCacheKey, llmResponse);
-            }
         }
 
         if (!llmResponse) {
@@ -1722,7 +1753,7 @@ class MonthlySummaryService {
             return null;
         }
 
-        const maxAttempts = allowRateLimitRetry ? 3 : 1;
+        const maxAttempts = allowRateLimitRetry ? 4 : 1;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
             try {
