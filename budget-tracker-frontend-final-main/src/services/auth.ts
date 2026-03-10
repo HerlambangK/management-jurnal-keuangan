@@ -113,5 +113,10 @@ export const clearLoginSessions = async (): Promise<SessionDeleteResponse> => {
 };
 
 export const logout = () => {
+    if (typeof window === "undefined") {
+        return;
+    }
+
     localStorage.removeItem("token");
+    localStorage.removeItem("auth_profile_cache_v1");
 };

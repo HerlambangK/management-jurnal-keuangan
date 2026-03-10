@@ -19,6 +19,20 @@ interface MonthPickerProps {
 }
 
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+const FULL_MONTH_LABELS = [
+  "Januari",
+  "Februari",
+  "Maret",
+  "April",
+  "Mei",
+  "Juni",
+  "Juli",
+  "Agustus",
+  "September",
+  "Oktober",
+  "November",
+  "Desember",
+];
 const DEFAULT_MIN_MONTH = "2000-01";
 const POPUP_WIDTH = 324;
 const POPUP_HEIGHT_ESTIMATE = 330;
@@ -50,9 +64,9 @@ const toComparableMonth = (year: number, month: number): number => year * 12 + m
 const formatMonthLabel = (monthKey: string, fallbackLabel: string): string => {
   const parsed = parseMonthKey(monthKey);
   if (!parsed) return fallbackLabel;
-  const date = new Date(`${monthKey}-01T00:00:00`);
-  if (Number.isNaN(date.getTime())) return fallbackLabel;
-  return date.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+  const label = FULL_MONTH_LABELS[parsed.month - 1];
+  if (!label) return fallbackLabel;
+  return `${label} ${parsed.year}`;
 };
 
 export default function MonthPicker({

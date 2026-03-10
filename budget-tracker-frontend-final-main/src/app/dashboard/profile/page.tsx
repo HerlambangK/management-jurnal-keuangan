@@ -204,7 +204,7 @@ export default function ProfilePage() {
 
       const { data, error } = await profileSafe(token, clientLocation);
       if (error) {
-        if (error.isUnauthorized) {
+        if (error.isUnauthorized || error.status === 404) {
           logout();
           router.replace("/");
           return;

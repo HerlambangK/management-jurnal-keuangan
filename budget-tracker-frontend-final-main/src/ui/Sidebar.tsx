@@ -190,6 +190,7 @@ const Sidebar = () => {
   const [financialActivities, setFinancialActivities] = useState<FinancialActivity[]>([]);
   const [isPulseLoading, setIsPulseLoading] = useState(true);
   const [isSyncPulseActive, setIsSyncPulseActive] = useState(false);
+  const [todayLabel, setTodayLabel] = useState("");
 
   const isMountedRef = useRef(true);
   const syncPulseTimeoutRef = useRef<number | null>(null);
@@ -254,7 +255,7 @@ const Sidebar = () => {
       if (!isMounted) return;
 
       if (error) {
-        if (error.isUnauthorized) {
+        if (error.isUnauthorized || error.status === 404) {
           logout();
           router.replace("/");
         }
@@ -400,15 +401,15 @@ const Sidebar = () => {
 
   const spendingTone = spendingRatio > 90 ? "bg-rose-500" : spendingRatio > 70 ? "bg-amber-500" : "bg-emerald-500";
 
-  const todayLabel = useMemo(
-    () =>
+  useEffect(() => {
+    setTodayLabel(
       new Date().toLocaleDateString("id-ID", {
         day: "2-digit",
         month: "long",
         year: "numeric",
-      }),
-    []
-  );
+      })
+    );
+  }, []);
 
   const handleLogout = () => {
     logout();

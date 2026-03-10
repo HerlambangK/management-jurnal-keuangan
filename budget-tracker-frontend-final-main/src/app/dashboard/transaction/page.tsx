@@ -42,6 +42,23 @@ type SortDirection = "asc" | "desc";
 type TypeFilter = "all" | "income" | "expense";
 type TransactionFormMode = "create" | "edit";
 
+const FULL_MONTH_LABELS = [
+  "Januari",
+  "Februari",
+  "Maret",
+  "April",
+  "Mei",
+  "Juni",
+  "Juli",
+  "Agustus",
+  "September",
+  "Oktober",
+  "November",
+  "Desember",
+];
+
+const SHORT_MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+
 const parseAmount = (amount: string | number): number => {
   if (typeof amount === "number") return amount;
 
@@ -82,25 +99,26 @@ const getCurrentMonthKey = (): string => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 };
 
-const formatMonthLabel = (monthKey: string): string => {
-  if (!/^\d{4}-\d{2}$/.test(monthKey)) return "periode ini";
-  const parsedDate = new Date(`${monthKey}-01T00:00:00`);
-  if (Number.isNaN(parsedDate.getTime())) return "periode ini";
+const parseMonthKey = (value: string): { year: number; month: number } | null => {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) return null;
+  const [yearText, monthText] = value.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+  return { year, month };
+};
 
-  return parsedDate.toLocaleDateString("id-ID", {
-    month: "long",
-    year: "numeric",
-  });
+const formatMonthLabel = (monthKey: string): string => {
+  const parsed = parseMonthKey(monthKey);
+  if (!parsed) return "periode ini";
+  const label = FULL_MONTH_LABELS[parsed.month - 1];
+  return label ? `${label} ${parsed.year}` : "periode ini";
 };
 
 const formatShortMonthLabel = (monthKey: string): string => {
-  if (!/^\d{4}-\d{2}$/.test(monthKey)) return monthKey;
-  const parsedDate = new Date(`${monthKey}-01T00:00:00`);
-  if (Number.isNaN(parsedDate.getTime())) return monthKey;
-
-  return parsedDate.toLocaleDateString("id-ID", {
-    month: "short",
-  });
+  const parsed = parseMonthKey(monthKey);
+  if (!parsed) return monthKey;
+  return SHORT_MONTH_LABELS[parsed.month - 1] || monthKey;
 };
 
 const formatCompactCurrency = (value: number): string => {
@@ -122,6 +140,8 @@ export default function TransactionPage() {
   const [modal, setModal] = useState<ModalProps | null>(null);
   const [isLoadingTable, setIsLoadingTable] = useState(false);
   const [isLoadingOverview, setIsLoadingOverview] = useState(false);
+  const [tableErrorMessage, setTableErrorMessage] = useState<string | null>(null);
+  const [overviewErrorMessage, setOverviewErrorMessage] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortField>("date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -181,6 +201,7 @@ export default function TransactionPage() {
 
   const loadTransaction = useCallback(async () => {
     setIsLoadingTable(true);
+    setTableErrorMessage(null);
     try {
       const res = await fetchTransaction(page, limit, debouncedSearch, selectedMonth);
       const nextTotalPages = Math.max(res?.pagination?.totalPage || res?.pagination?.totalPages || 1, 1);
@@ -192,11 +213,7 @@ export default function TransactionPage() {
         setPage(nextTotalPages);
       }
     } catch (error) {
-      if (error instanceof Error) {
-        console.error({ message: error.message, type: "danger" });
-      } else {
-        console.error({ message: "Terjadi Kesalahan", type: "danger" });
-      }
+      setTableErrorMessage(error instanceof Error ? error.message : "Terjadi kesalahan saat memuat transaksi.");
     } finally {
       setIsLoadingTable(false);
     }
@@ -204,16 +221,13 @@ export default function TransactionPage() {
 
   const loadFinancialOverview = useCallback(async () => {
     setIsLoadingOverview(true);
+    setOverviewErrorMessage(null);
     try {
       const res = await fetchFinancialOverview(selectedMonth);
       setFinancialOverview(res?.data || null);
       triggerSyncPulse();
     } catch (error) {
-      if (error instanceof Error) {
-        console.error({ message: error.message, type: "danger" });
-      } else {
-        console.error({ message: "Terjadi Kesalahan", type: "danger" });
-      }
+      setOverviewErrorMessage(error instanceof Error ? error.message : "Terjadi kesalahan saat memuat ringkasan transaksi.");
     } finally {
       setIsLoadingOverview(false);
     }
@@ -616,6 +630,11 @@ export default function TransactionPage() {
       </section>
 
       <section className="grid gap-4 xl:grid-cols-12">
+        {overviewErrorMessage && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 xl:col-span-12">
+            Ringkasan transaksi belum berhasil dimuat: {overviewErrorMessage}
+          </div>
+        )}
         {isLoadingOverview && (
           <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 xl:col-span-12">
             Memuat ringkasan ledger...
@@ -759,6 +778,11 @@ export default function TransactionPage() {
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm md:p-5">
+        {tableErrorMessage && (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Daftar transaksi belum berhasil dimuat: {tableErrorMessage}
+          </div>
+        )}
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="relative w-full lg:max-w-sm">
             <FaSearch className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />

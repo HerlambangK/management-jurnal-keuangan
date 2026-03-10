@@ -223,6 +223,7 @@ export default function DashboardPage() {
   const [chartRange, setChartRange] = useState<BrushRange>({ startIndex: 0, endIndex: 0 });
   const [selectedMonth, setSelectedMonth] = useState("");
   const [isSyncPulseActive, setIsSyncPulseActive] = useState(false);
+  const [dateNow, setDateNow] = useState("");
 
   const isMountedRef = useRef(true);
   const syncPulseTimeoutRef = useRef<number | null>(null);
@@ -274,6 +275,12 @@ export default function DashboardPage() {
           token ? profileSafe(token) : Promise.resolve({ data: null, error: null }),
         ]);
 
+        if (profileResult?.error?.isUnauthorized || profileResult?.error?.status === 404) {
+          logout();
+          window.location.href = "/";
+          return;
+        }
+
         const summaryData = summaryRes?.data || null;
         const fallbackMonth = typeof summaryData?.period_month === "string" ? summaryData.period_month : "";
         const monthForTransactions = selectedMonth || fallbackMonth;
@@ -288,12 +295,6 @@ export default function DashboardPage() {
 
         if (withSyncPulse) {
           triggerSyncPulse();
-        }
-
-        if (profileResult?.error?.isUnauthorized) {
-          logout();
-          window.location.href = "/";
-          return;
         }
       } catch (error) {
         if (!isMountedRef.current) return;
@@ -321,16 +322,16 @@ export default function DashboardPage() {
     });
   }, [loadDashboardData]);
 
-  const dateNow = useMemo(
-    () =>
+  useEffect(() => {
+    setDateNow(
       new Date().toLocaleDateString("id-ID", {
         weekday: "long",
         day: "numeric",
         month: "long",
         year: "numeric",
-      }),
-    []
-  );
+      })
+    );
+  }, []);
 
   const income = toSafeNumber(summary?.income);
   const expense = toSafeNumber(summary?.expense);
